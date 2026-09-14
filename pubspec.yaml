@@ -32,6 +32,9 @@ dependencies:
     sdk: flutter
 
   cupertino_icons: ^1.0.8
+  # Direct, not transitive: deriveSourceId() hashes the Xtream url+username
+  # into the local source id, so the catalog's primary key depends on it.
+  crypto: ^3.0.7
   flutter_riverpod: ^2.6.1
   dio: ^5.7.0
   sqflite: ^2.4.1
@@ -48,6 +51,10 @@ dev_dependencies:
     sdk: flutter
   integration_test:
     sdk: flutter
+
+  # Lets DatabaseService tests open a real SQLite database on the Dart VM,
+  # which plain `flutter test` cannot do (sqflite needs a platform channel).
+  sqflite_common_ffi: ^2.3.4
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
