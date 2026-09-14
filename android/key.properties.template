@@ -1,0 +1,16 @@
+# Defines the release signing keys build.gradle.kts needs to sign a
+# distributable release APK/AAB. The values below are intentionally blank -
+# this file is committed so contributors can see what keys are expected.
+# Real values are supplied by key.properties in this same directory, which
+# is gitignored and only exists on your personal machine: copy this file to
+# key.properties and fill in your own signing details there.
+#
+# If key.properties does not exist, the release build type falls back to
+# debug signing automatically (so `flutter build apk --debug` and CI both
+# still work without this file) - but the resulting APK/AAB will not be
+# installable as an update over a properly-signed release and cannot be
+# uploaded to a store expecting your real signing key.
+storeFile=
+storePassword=
+keyAlias=
+keyPassword=

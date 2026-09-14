@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Replaces the blanket android:usesCleartextTraffic="true" that previously
+    lived on <application>. That flag permitted plaintext HTTP to ANY host
+    reachable from the app. This config still permits plaintext HTTP to any
+    host, for the same reason the flag did: Xtream Codes provider hostnames
+    are entered by the user at runtime (there is no fixed backend), so a
+    build-time domain allowlist is not possible without breaking real
+    providers, most of which only serve plain HTTP.
+
+    Honest accounting of what this buys over the old flag:
+      - It does NOT restrict which hosts may be contacted over cleartext.
+        cleartextTrafficPermitted="true" on the base-config applies to all
+        domains, same as before.
+      - It DOES give the app an explicit trust-anchor declaration
+        (system CAs only) for TLS/HTTPS connections, and a single place to
+        tighten later (e.g. per-domain <domain-config> overrides, or
+        user-configurable pinning) once provider hosts are known at
+        install/runtime and a UI exists to manage that trust.
+      - It also documents intent: this is a deliberate, scoped decision
+        rather than an accidental leftover flag, and centralizes future
+        network security policy in one reviewable file instead of a manifest
+        attribute.
+
+    Residual risk: plaintext traffic to the user-entered Xtream host (and to
+    any other host the app happens to talk to) can still be observed or
+    tampered with by a network-level attacker (e.g. on hostile Wi-Fi). This
+    is inherent to supporting HTTP-only IPTV providers and is not solved by
+    this file.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+</network-security-config>
