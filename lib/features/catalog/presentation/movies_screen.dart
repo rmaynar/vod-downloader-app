@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/category_item.dart';
@@ -27,31 +29,68 @@ class MoviesScreen extends ConsumerStatefulWidget {
 }
 
 class _MoviesScreenState extends ConsumerState<MoviesScreen> {
+  static const _searchDebounce = Duration(milliseconds: 250);
+
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   String _selectedCategoryId = 'all';
   MovieSortOption _sortOption = MovieSortOption.nameAsc;
+  Timer? _debounceTimer;
+
+  // Memoisation cache for the filtered/sorted movie list. `_cachedSource`
+  // is compared by identity (not length) because CatalogState hands us a
+  // brand-new List instance on every sync, even when its contents happen
+  // to be the same size as before.
+  List<MediaItem>? _cachedSource;
+  String? _cachedQuery;
+  String? _cachedCategoryId;
+  MovieSortOption? _cachedSortOption;
+  List<MediaItem>? _cachedResult;
+
+  /// Number of times the filter/sort pass has actually recomputed (i.e.
+  /// cache misses). Exposed for tests to verify that a burst of keystrokes
+  /// produces a single recompute rather than one per keystroke.
+  @visibleForTesting
+  int filterPassCount = 0;
 
   @override
   void initState() {
     super.initState();
-    _searchController.addListener(() {
-      final text = _searchController.text;
-      if (text != _searchQuery) {
-        setState(() {
-          _searchQuery = text;
-        });
-      }
+    _searchController.addListener(_onSearchChanged);
+  }
+
+  void _onSearchChanged() {
+    final text = _searchController.text;
+    if (text == _searchQuery) return;
+
+    _debounceTimer?.cancel();
+    if (text.isEmpty) {
+      // Clearing the search (via the clear button or deleting all text)
+      // should feel instant, not wait out the debounce window.
+      setState(() {
+        _searchQuery = text;
+      });
+      return;
+    }
+
+    _debounceTimer = Timer(_searchDebounce, () {
+      _debounceTimer = null;
+      if (!mounted) return;
+      setState(() {
+        _searchQuery = text;
+      });
     });
   }
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
 
   void _resetFilters() {
+    _debounceTimer?.cancel();
     _searchController.clear();
     setState(() {
       _searchQuery = '';
@@ -62,6 +101,74 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
 
   void _openDetails(MediaItem item) {
     MediaDetailsModal.show(context, item, type: MediaType.movie);
+  }
+
+  /// Returns the filtered and sorted movie list, recomputing only when one
+  /// of its inputs (source list identity, query, category, sort option)
+  /// actually changed since the last call. Reused across unrelated
+  /// rebuilds of this screen (e.g. sync-progress updates).
+  List<MediaItem> _filteredAndSortedMovies(List<MediaItem> movies) {
+    final query = _searchQuery.trim().toLowerCase();
+    if (identical(_cachedSource, movies) &&
+        _cachedQuery == query &&
+        _cachedCategoryId == _selectedCategoryId &&
+        _cachedSortOption == _sortOption) {
+      return _cachedResult!;
+    }
+
+    final result = _computeFilteredMovies(movies, query);
+
+    _cachedSource = movies;
+    _cachedQuery = query;
+    _cachedCategoryId = _selectedCategoryId;
+    _cachedSortOption = _sortOption;
+    _cachedResult = result;
+    filterPassCount++;
+
+    return result;
+  }
+
+  /// Computes the filtered + sorted movie list for a given lowercased
+  /// [query]. This is the sole place that turns the full in-memory
+  /// `movies` list into what the grid renders.
+  ///
+  /// SQL SWAP-POINT: when SQL-backed paging
+  /// (`DatabaseService.searchMedia`/`countMedia`) is wired up, this is the
+  /// method to replace with a query against the database — the debounce
+  /// and memoisation around it can stay as-is.
+  List<MediaItem> _computeFilteredMovies(List<MediaItem> movies, String query) {
+    final hasSearch = query.isNotEmpty;
+    final hasCategory = _selectedCategoryId != 'all';
+
+    // Precompute each title's lowercase form once during the filter pass
+    // so the sort comparator never re-lowercases a name (which would
+    // otherwise run toLowerCase() O(n log n) times instead of O(n)).
+    final entries = <({MediaItem item, String lowerName})>[];
+    for (final m in movies) {
+      if (hasCategory && m.categoryId != _selectedCategoryId) continue;
+      final lowerName = m.name.toLowerCase();
+      if (hasSearch && !lowerName.contains(query)) continue;
+      entries.add((item: m, lowerName: lowerName));
+    }
+
+    entries.sort((a, b) {
+      switch (_sortOption) {
+        case MovieSortOption.nameAsc:
+          return a.lowerName.compareTo(b.lowerName);
+        case MovieSortOption.nameDesc:
+          return b.lowerName.compareTo(a.lowerName);
+        case MovieSortOption.ratingDesc:
+          final diff = b.item.numericRating.compareTo(a.item.numericRating);
+          if (diff != 0) return diff;
+          return a.lowerName.compareTo(b.lowerName);
+        case MovieSortOption.ratingAsc:
+          final diff = a.item.numericRating.compareTo(b.item.numericRating);
+          if (diff != 0) return diff;
+          return a.lowerName.compareTo(b.lowerName);
+      }
+    });
+
+    return entries.map((e) => e.item).toList(growable: false);
   }
 
   @override
@@ -78,39 +185,13 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
       }
     }
 
-    // Filter and Sort Movies
+    // Filter and Sort Movies (memoised — see _filteredAndSortedMovies)
     final query = _searchQuery.trim().toLowerCase();
     final hasSearch = query.isNotEmpty;
     final hasCategory = _selectedCategoryId != 'all';
     final isFiltered = hasSearch || hasCategory;
 
-    final filteredMovies = movies.where((m) {
-      if (hasCategory && m.categoryId != _selectedCategoryId) {
-        return false;
-      }
-      if (hasSearch && !m.name.toLowerCase().contains(query)) {
-        return false;
-      }
-      return true;
-    }).toList();
-
-    // Sort
-    filteredMovies.sort((a, b) {
-      switch (_sortOption) {
-        case MovieSortOption.nameAsc:
-          return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-        case MovieSortOption.nameDesc:
-          return b.name.toLowerCase().compareTo(a.name.toLowerCase());
-        case MovieSortOption.ratingDesc:
-          final diff = b.numericRating.compareTo(a.numericRating);
-          if (diff != 0) return diff;
-          return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-        case MovieSortOption.ratingAsc:
-          final diff = a.numericRating.compareTo(b.numericRating);
-          if (diff != 0) return diff;
-          return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-      }
-    });
+    final filteredMovies = _filteredAndSortedMovies(movies);
 
     final selectedCategoryObj = categories.firstWhere(
       (c) => c.categoryId == _selectedCategoryId,

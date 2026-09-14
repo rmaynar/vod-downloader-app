@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/category.dart';
@@ -27,26 +29,62 @@ class SeriesScreen extends ConsumerStatefulWidget {
 }
 
 class _SeriesScreenState extends ConsumerState<SeriesScreen> {
+  static const _searchDebounce = Duration(milliseconds: 250);
+
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   String _selectedCategoryId = 'all';
   SeriesSortOption _sortOption = SeriesSortOption.nameAsc;
+  Timer? _debounceTimer;
+
+  // Memoisation cache for the filtered/sorted series list. `_cachedSource`
+  // is compared by identity (not length) because CatalogState hands us a
+  // brand-new List instance on every sync, even when its contents happen
+  // to be the same size as before.
+  List<MediaItem>? _cachedSource;
+  String? _cachedQuery;
+  String? _cachedCategoryId;
+  SeriesSortOption? _cachedSortOption;
+  List<MediaItem>? _cachedResult;
+
+  /// Number of times the filter/sort pass has actually recomputed (i.e.
+  /// cache misses). Exposed for tests to verify that a burst of keystrokes
+  /// produces a single recompute rather than one per keystroke.
+  @visibleForTesting
+  int filterPassCount = 0;
 
   @override
   void initState() {
     super.initState();
-    _searchController.addListener(() {
-      final text = _searchController.text;
-      if (text != _searchQuery) {
-        setState(() {
-          _searchQuery = text;
-        });
-      }
+    _searchController.addListener(_onSearchChanged);
+  }
+
+  void _onSearchChanged() {
+    final text = _searchController.text;
+    if (text == _searchQuery) return;
+
+    _debounceTimer?.cancel();
+    if (text.isEmpty) {
+      // Clearing the search (via the clear button or deleting all text)
+      // should feel instant, not wait out the debounce window.
+      setState(() {
+        _searchQuery = text;
+      });
+      return;
+    }
+
+    _debounceTimer = Timer(_searchDebounce, () {
+      _debounceTimer = null;
+      if (!mounted) return;
+      setState(() {
+        _searchQuery = text;
+      });
     });
   }
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -55,44 +93,87 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
     MediaDetailsModal.show(context, item, type: MediaType.series);
   }
 
+  /// Returns the filtered and sorted series list, recomputing only when
+  /// one of its inputs (source list identity, query, category, sort
+  /// option) actually changed since the last call. Reused across
+  /// unrelated rebuilds of this screen (e.g. sync-progress updates).
+  List<MediaItem> _filteredAndSortedSeries(List<MediaItem> series) {
+    final query = _searchQuery.trim().toLowerCase();
+    if (identical(_cachedSource, series) &&
+        _cachedQuery == query &&
+        _cachedCategoryId == _selectedCategoryId &&
+        _cachedSortOption == _sortOption) {
+      return _cachedResult!;
+    }
+
+    final result = _computeFilteredSeries(series, query);
+
+    _cachedSource = series;
+    _cachedQuery = query;
+    _cachedCategoryId = _selectedCategoryId;
+    _cachedSortOption = _sortOption;
+    _cachedResult = result;
+    filterPassCount++;
+
+    return result;
+  }
+
+  /// Computes the filtered + sorted series list for a given lowercased
+  /// [query]. This is the sole place that turns the full in-memory
+  /// `series` list into what the grid renders.
+  ///
+  /// SQL SWAP-POINT: when SQL-backed paging
+  /// (`DatabaseService.searchMedia`/`countMedia`) is wired up, this is the
+  /// method to replace with a query against the database — the debounce
+  /// and memoisation around it can stay as-is.
+  List<MediaItem> _computeFilteredSeries(List<MediaItem> series, String query) {
+    final hasSearch = query.isNotEmpty;
+    final hasCategory = _selectedCategoryId != 'all';
+
+    // Precompute each title's lowercase form once during the filter pass
+    // so the sort comparator never re-lowercases a name (which would
+    // otherwise run toLowerCase() O(n log n) times instead of O(n)).
+    final entries = <({MediaItem item, String lowerName})>[];
+    for (final s in series) {
+      if (hasCategory && s.categoryId != _selectedCategoryId) continue;
+      final lowerName = s.name.toLowerCase();
+      if (hasSearch && !lowerName.contains(query)) continue;
+      entries.add((item: s, lowerName: lowerName));
+    }
+
+    entries.sort((a, b) {
+      switch (_sortOption) {
+        case SeriesSortOption.nameAsc:
+          return a.lowerName.compareTo(b.lowerName);
+        case SeriesSortOption.nameDesc:
+          return b.lowerName.compareTo(a.lowerName);
+        case SeriesSortOption.ratingDesc:
+          final diff = b.item.numericRating.compareTo(a.item.numericRating);
+          if (diff != 0) return diff;
+          return a.lowerName.compareTo(b.lowerName);
+        case SeriesSortOption.ratingAsc:
+          final diff = a.item.numericRating.compareTo(b.item.numericRating);
+          if (diff != 0) return diff;
+          return a.lowerName.compareTo(b.lowerName);
+      }
+    });
+
+    return entries.map((e) => e.item).toList(growable: false);
+  }
+
   @override
   Widget build(BuildContext context) {
     final catalog = ref.watch(catalogProvider);
     final series = catalog.series;
     final categories = catalog.seriesCategories;
 
-    // Filter & Sort
+    // Filter & Sort (memoised — see _filteredAndSortedSeries)
     final query = _searchQuery.trim().toLowerCase();
     final hasSearch = query.isNotEmpty;
     final hasCategory = _selectedCategoryId != 'all';
     final isFiltered = hasSearch || hasCategory;
 
-    final filteredSeries = series.where((s) {
-      if (hasCategory && s.categoryId != _selectedCategoryId) {
-        return false;
-      }
-      if (hasSearch && !s.name.toLowerCase().contains(query)) {
-        return false;
-      }
-      return true;
-    }).toList();
-
-    filteredSeries.sort((a, b) {
-      switch (_sortOption) {
-        case SeriesSortOption.nameAsc:
-          return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-        case SeriesSortOption.nameDesc:
-          return b.name.toLowerCase().compareTo(a.name.toLowerCase());
-        case SeriesSortOption.ratingDesc:
-          final diff = b.numericRating.compareTo(a.numericRating);
-          if (diff != 0) return diff;
-          return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-        case SeriesSortOption.ratingAsc:
-          final diff = a.numericRating.compareTo(b.numericRating);
-          if (diff != 0) return diff;
-          return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-      }
-    });
+    final filteredSeries = _filteredAndSortedSeries(series);
 
     return Scaffold(
       backgroundColor: AppColors.background,
