@@ -1,0 +1,113 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
+import 'package:nodecast_catalog_flutter/core/models/source_account.dart';
+import 'package:nodecast_catalog_flutter/features/catalog/presentation/home_screen.dart';
+import 'package:nodecast_catalog_flutter/features/catalog/providers/catalog_provider.dart';
+import 'package:nodecast_catalog_flutter/features/navigation/app_shell.dart';
+
+/// A CatalogNotifier stand-in that skips real network/DB init and records
+/// calls made to [syncCatalog], so tests can drive an "authenticated" UI
+/// state without touching the network or SQLite.
+class _RecordingCatalogNotifier extends CatalogNotifier {
+  String? lastSourceIdArg;
+  bool? lastForceSyncArg;
+  int syncCallCount = 0;
+
+  _RecordingCatalogNotifier(super.ref) {
+    state = state.copyWith(
+      currentSourceId: 'src_1',
+      currentAccount: const SourceAccount(
+        id: 'src_1',
+        sourceId: 'src_1',
+        name: 'Test User',
+        url: 'http://test.local',
+        username: 'tester',
+      ),
+    );
+  }
+
+  @override
+  Future<void> initCatalog() async {}
+
+  @override
+  Future<void> syncCatalog({
+    String? sourceId,
+    bool forceSync = false,
+    bool force = false,
+  }) async {
+    syncCallCount++;
+    lastSourceIdArg = sourceId;
+    lastForceSyncArg = forceSync;
+  }
+}
+
+void main() {
+  group('AppShell header layout', () {
+    testWidgets('does not overflow on a narrow phone width', (tester) async {
+      // Matches the logical width of a Pixel-class emulator (1280 physical /
+      // 3.0 density) where the header previously overflowed by 34px because
+      // the "VOD Downloader" wordmark was never hidden on narrow screens.
+      tester.view.physicalSize = const Size(1280, 2856);
+      tester.view.devicePixelRatio = 3.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final router = GoRouter(
+        initialLocation: '/',
+        routes: [
+          GoRoute(
+            path: '/',
+            builder: (context, state) =>
+                const AppShell(child: SizedBox.shrink()),
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            catalogProvider.overrideWith(
+              (ref) => _RecordingCatalogNotifier(ref),
+            ),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('HomeScreen force-sync button', () {
+    testWidgets('invokes syncCatalog with only named args (forceSync: true)',
+        (tester) async {
+      late _RecordingCatalogNotifier fakeNotifier;
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            catalogProvider.overrideWith((ref) {
+              fakeNotifier = _RecordingCatalogNotifier(ref);
+              return fakeNotifier;
+            }),
+          ],
+          child: const MaterialApp(home: HomeScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Force refresh catalog'));
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      expect(fakeNotifier.syncCallCount, 1);
+      expect(fakeNotifier.lastForceSyncArg, isTrue);
+      // sourceId is intentionally omitted by the caller so syncCatalog
+      // falls back to the currently active source.
+      expect(fakeNotifier.lastSourceIdArg, isNull);
+    });
+  });
+}
