@@ -9,8 +9,11 @@ import '../../../core/models/catalog_source.dart';
 import '../../../core/models/catalog_stats.dart';
 import '../../../core/models/category_item.dart';
 import '../../../core/models/media_item.dart';
+import '../../../core/models/xtream_source.dart';
 import '../../../core/network/api_client.dart';
+import '../../../core/network/xtream_client.dart';
 import '../../../core/providers/backend_config_provider.dart';
+import '../../../core/providers/xtream_provider.dart';
 import '../../../core/services/download_service.dart';
 export '../../../core/providers/backend_config_provider.dart' show apiClientProvider;
 
@@ -124,14 +127,12 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
     initCatalog();
   }
 
-  ApiClient get _api => ref.read(apiClientProvider);
-
   /// Initializes the catalog:
-  /// 1. Loads saved accounts from SharedPreferences / DB.
-  /// 2. Queries backend API for sources.
-  /// 3. Selects active source.
-  /// 4. Loads cached data from SQLite DatabaseService.
-  /// 5. Triggers auto-sync if SQLite cache is empty.
+  /// 1. Loads saved accounts from SharedPreferences, falling back to the
+  ///    `sources` table in SQLite.
+  /// 2. Selects active source.
+  /// 3. Loads cached data from SQLite DatabaseService.
+  /// 4. Triggers auto-sync if SQLite cache is empty.
   Future<void> initCatalog() async {
     state = state.copyWith(
       isLoading: true,
@@ -162,27 +163,9 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
         accounts = await _db.getSources();
       }
 
-      // 2. Query backend API for sources
-      List<SourceAccount> apiSources = [];
-      try {
-        apiSources = await _api.getSources();
-      } catch (_) {
-        // Backend proxy might be offline or starting up; proceed with local cache
-      }
-
-      // Merge backend sources with saved accounts
-      bool accountsChanged = false;
-      for (final s in apiSources) {
-        final alreadySaved = accounts.any(
-          (a) => a.sourceId == s.sourceId || a.id == s.id,
-        );
-        if (!alreadySaved) {
-          accounts.add(s);
-          accountsChanged = true;
-        }
-      }
-
-      if (accountsChanged || (rawSaved == null && accounts.isNotEmpty)) {
+      // Persist the DB-sourced fallback back into SharedPreferences so
+      // subsequent launches read from the faster cache.
+      if (rawSaved == null && accounts.isNotEmpty) {
         await prefs.setString(
           ApiConstants.keySavedAccounts,
           jsonEncode(accounts.map((a) => a.toJson()).toList()),
@@ -190,7 +173,7 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
         await _db.saveSources(accounts);
       }
 
-      // 3. Determine active source
+      // 2. Determine active source
       String? activeId = prefs.getString(ApiConstants.keyCurrentSourceId);
       if (activeId == null || activeId.isEmpty) {
         activeId = await _db.getMeta(ApiConstants.metaKeyCurrentSource);
@@ -217,7 +200,7 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
         activeId = null;
       }
 
-      // 4. Load cached data from SQLite DatabaseService
+      // 3. Load cached data from SQLite DatabaseService
       List<MediaItem> cachedMovies = [];
       List<MediaItem> cachedSeries = [];
       List<CategoryItem> cachedVodCats = [];
@@ -236,7 +219,7 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
       }
 
       state = state.copyWith(
-        sources: apiSources.isNotEmpty ? apiSources : accounts,
+        sources: accounts,
         savedAccounts: accounts,
         currentSourceId: activeId,
         currentAccount: activeAccount,
@@ -249,7 +232,7 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
         syncProgress: '',
       );
 
-      // 5. Trigger auto-sync if cache is empty
+      // 4. Trigger auto-sync if cache is empty
       if (activeId != null &&
           activeId.isNotEmpty &&
           cachedMovies.isEmpty &&
@@ -324,7 +307,45 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
     }
   }
 
-  /// Downloads categories, movies, series from ApiClient, saves to DatabaseService, updates state.
+  /// Finds the [SourceAccount] (with credentials) for [sourceId], checking
+  /// the currently active account first, then saved accounts / sources.
+  SourceAccount? _findAccountForSource(String sourceId) {
+    if (state.currentAccount != null &&
+        (state.currentAccount!.sourceId == sourceId ||
+            state.currentAccount!.id == sourceId)) {
+      return state.currentAccount;
+    }
+    final saved = state.savedAccounts.where(
+      (a) => a.sourceId == sourceId || a.id == sourceId,
+    );
+    if (saved.isNotEmpty) return saved.first;
+    final sources = state.sources.where(
+      (a) => a.sourceId == sourceId || a.id == sourceId,
+    );
+    return sources.isNotEmpty ? sources.first : null;
+  }
+
+  /// Renders an error thrown while talking to the Xtream provider into a
+  /// user-facing message. [XtreamException.message] is already
+  /// human-readable (auth failure, inactive account, network/timeout); any
+  /// other exception falls back to its string form.
+  String _describeSyncError(Object error) {
+    if (error is XtreamException) return error.message;
+    return error.toString();
+  }
+
+  /// Downloads categories, movies, series directly from the Xtream provider
+  /// via [XtreamClient], saves them to DatabaseService, and updates state.
+  ///
+  /// `forceSync` no longer triggers a backend proxy re-sync (there is no
+  /// backend proxy); it just means "refetch from the provider, ignore the
+  /// SQLite cache".
+  ///
+  /// Errors are never swallowed into an empty catalog: if every fetch fails,
+  /// `state.error` is set and the previously cached data (in SQLite and in
+  /// state) is left untouched. If only some fetches fail, the ones that
+  /// succeeded are still saved/applied and the failure is surfaced via
+  /// `state.error` rather than silently wiping the failed slice's cache.
   Future<void> syncCatalog({
     String? sourceId,
     bool forceSync = false,
@@ -338,76 +359,140 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
 
     if (state.isSyncing) return;
 
-    final shouldForce = forceSync || force;
+    final account = _findAccountForSource(targetId);
+    if (account == null) {
+      state = state.copyWith(
+        error: 'No saved account found for this source. Please sign in again.',
+      );
+      return;
+    }
+    if (account.password == null || account.password!.isEmpty) {
+      state = state.copyWith(
+        error:
+            '"${account.displayName}" was saved before a password was required '
+            '(from an older sign-in) and can no longer authenticate. Please '
+            'remove it and sign in again.',
+      );
+      return;
+    }
+
+    final client = XtreamClient(
+      baseUrl: account.url,
+      username: account.username,
+      password: account.password!,
+    );
+
     state = state.copyWith(
       isSyncing: true,
       clearError: true,
-      syncProgress: shouldForce ? 'Syncing backend proxy...' : 'Connecting...',
+      syncProgress: 'Connecting...',
     );
 
     try {
-      if (shouldForce) {
-        state = state.copyWith(syncProgress: 'Syncing backend proxy...');
-        try {
-          await _api.syncSource(targetId);
-        } catch (_) {
-          // Continue even if backend proxy sync endpoint fails
-        }
+      state = state.copyWith(syncProgress: 'Downloading categories...');
+      List<CategoryItem>? vodCats;
+      List<CategoryItem>? seriesCats;
+      String? vodCatsErr;
+      String? seriesCatsErr;
+      try {
+        vodCats = await client.getVodCategories(targetId);
+      } catch (e) {
+        vodCatsErr = _describeSyncError(e);
+      }
+      try {
+        seriesCats = await client.getSeriesCategories(targetId);
+      } catch (e) {
+        seriesCatsErr = _describeSyncError(e);
       }
 
-      state = state.copyWith(syncProgress: 'Downloading categories...');
-      final vodCats = await _api
-          .getVodCategories(targetId)
-          .catchError((_) => <CategoryItem>[]);
-      final seriesCats = await _api
-          .getSeriesCategories(targetId)
-          .catchError((_) => <CategoryItem>[]);
-
       state = state.copyWith(syncProgress: 'Downloading Movies...');
-      final movies = await _api
-          .getVodStreams(targetId)
-          .catchError((_) => <MediaItem>[]);
+      List<MediaItem>? movies;
+      String? moviesErr;
+      try {
+        movies = await client.getVodStreams(targetId);
+      } catch (e) {
+        moviesErr = _describeSyncError(e);
+      }
 
       state = state.copyWith(syncProgress: 'Downloading Series...');
-      final series = await _api
-          .getSeries(targetId)
-          .catchError((_) => <MediaItem>[]);
+      List<MediaItem>? series;
+      String? seriesErr;
+      try {
+        series = await client.getSeries(targetId);
+      } catch (e) {
+        seriesErr = _describeSyncError(e);
+      }
+
+      final errors = [vodCatsErr, seriesCatsErr, moviesErr, seriesErr]
+          .whereType<String>()
+          .toSet() // de-dupe identical messages (e.g. one auth failure
+          // usually breaks all four calls the same way)
+          .toList();
+
+      // Total failure: nothing came back from the provider at all. Do not
+      // touch the SQLite cache or state's catalog data — surface the error
+      // and leave whatever was previously cached/displayed alone.
+      if (vodCats == null && seriesCats == null && movies == null && series == null) {
+        state = state.copyWith(
+          isSyncing: false,
+          syncProgress: '',
+          error: errors.isNotEmpty
+              ? 'Sync failed: ${errors.join(' | ')}'
+              : 'Sync failed: unknown error',
+        );
+        return;
+      }
 
       state = state.copyWith(syncProgress: 'Saving to SQLite cache...');
-      await _db.saveCategories(targetId, 'vod', vodCats);
-      await _db.saveCategories(targetId, 'series', seriesCats);
-      await _db.saveMovies(targetId, movies);
-      await _db.saveSeries(targetId, series);
+      if (vodCats != null) await _db.saveCategories(targetId, 'vod', vodCats);
+      if (seriesCats != null) {
+        await _db.saveCategories(targetId, 'series', seriesCats);
+      }
+      if (movies != null) await _db.saveMovies(targetId, movies);
+      if (series != null) await _db.saveSeries(targetId, series);
 
       final now = DateTime.now();
       await _db.setMeta('lastSync_$targetId', now.toIso8601String());
 
+      final combinedError = errors.isNotEmpty
+          ? 'Some catalog data failed to sync: ${errors.join(' | ')}'
+          : null;
+      final progressLabel = combinedError != null ? 'Completed with errors' : 'Completed';
+
       if (state.currentSourceId == targetId) {
         state = state.copyWith(
-          movies: movies,
-          series: series,
-          vodCategories: vodCats,
-          seriesCategories: seriesCats,
+          movies: movies ?? state.movies,
+          series: series ?? state.series,
+          vodCategories: vodCats ?? state.vodCategories,
+          seriesCategories: seriesCats ?? state.seriesCategories,
           lastSyncTime: now,
           isSyncing: false,
-          syncProgress: 'Completed',
+          syncProgress: progressLabel,
+          error: combinedError,
         );
       } else {
         state = state.copyWith(
           isSyncing: false,
-          syncProgress: 'Completed',
+          syncProgress: progressLabel,
+          error: combinedError,
         );
       }
     } catch (e) {
       state = state.copyWith(
         isSyncing: false,
         syncProgress: '',
-        error: 'Sync failed: $e',
+        error: 'Sync failed: ${_describeSyncError(e)}',
       );
     }
   }
 
-  /// Verifies backend sources, creates source if new, saves to savedAccounts and SQLite, triggers sync, updates currentSourceId.
+  /// Authenticates directly against the Xtream Codes provider, derives a
+  /// stable local source id, persists a [SourceAccount] (including its
+  /// password — required to build stream URLs and to re-authenticate later),
+  /// and triggers an initial catalog sync.
+  ///
+  /// [proxyUrl] is accepted for source-compatibility with older call sites
+  /// but is a no-op: there is no backend proxy left to point at.
   Future<void> loginWithXtream({
     required String url,
     required String username,
@@ -417,48 +502,30 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
   }) async {
     state = state.copyWith(
       isLoading: true,
-      syncProgress: 'Connecting to backend...',
+      syncProgress: 'Connecting to Xtream server...',
       clearError: true,
     );
 
     try {
-      if (proxyUrl != null && proxyUrl.trim().isNotEmpty) {
-        await _api.updateBaseUrl(proxyUrl.trim());
-      }
-
-      var cleanUrl = url.trim();
-      if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
-        cleanUrl = 'http://$cleanUrl';
-      }
-      cleanUrl = cleanUrl.replaceAll(RegExp(r'/+$'), '');
+      final cleanUrl = normalizeServerUrl(url);
       final cleanUsername = username.trim();
+      final cleanPassword = password.trim();
 
-      state = state.copyWith(syncProgress: 'Verifying backend sources...');
-      final allSources = await _api.getSources();
+      // This is now the only credential check: a direct authenticate()
+      // call against the provider's player_api.php. It throws
+      // XtreamException on bad credentials, an inactive/expired account, or
+      // a network/connection failure — the catch block below surfaces
+      // whichever it was.
+      final client = XtreamClient(
+        baseUrl: cleanUrl,
+        username: cleanUsername,
+        password: cleanPassword,
+      );
 
-      SourceAccount? matched;
-      for (final s in allSources) {
-        final sUrl = s.url.trim().replaceAll(RegExp(r'/+$'), '');
-        if (sUrl.toLowerCase() == cleanUrl.toLowerCase() &&
-            s.username.trim().toLowerCase() == cleanUsername.toLowerCase()) {
-          matched = s;
-          break;
-        }
-      }
+      state = state.copyWith(syncProgress: 'Verifying credentials...');
+      await client.authenticate();
 
-      String sourceId;
-      if (matched != null) {
-        sourceId = matched.sourceId;
-      } else {
-        state = state.copyWith(syncProgress: 'Registering Xtream source...');
-        final created = await _api.createSource(
-          name: name?.trim().isNotEmpty == true ? name!.trim() : cleanUsername,
-          url: cleanUrl,
-          username: cleanUsername,
-          password: password.trim(),
-        );
-        sourceId = created.sourceId;
-      }
+      final sourceId = deriveSourceId(cleanUrl, cleanUsername);
 
       final account = SourceAccount(
         id: sourceId,
@@ -466,7 +533,7 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
         name: name?.trim().isNotEmpty == true ? name!.trim() : cleanUsername,
         url: cleanUrl,
         username: cleanUsername,
-        password: password.trim(),
+        password: cleanPassword,
         lastUsedAt: DateTime.now().millisecondsSinceEpoch,
       );
 
@@ -485,6 +552,7 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
       await _db.setMeta(ApiConstants.metaKeyCurrentSource, sourceId);
 
       state = state.copyWith(
+        sources: updatedAccounts,
         savedAccounts: updatedAccounts,
         currentSourceId: sourceId,
         currentAccount: account,
@@ -493,12 +561,20 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
 
       state = state.copyWith(syncProgress: 'Fetching and saving catalog...');
       await syncCatalog(sourceId: sourceId, forceSync: true);
+    } on XtreamException catch (e) {
+      state = state.copyWith(
+        isLoading: false,
+        isSyncing: false,
+        syncProgress: '',
+        error: e.message,
+      );
+      rethrow;
     } catch (e) {
       state = state.copyWith(
         isLoading: false,
         isSyncing: false,
         syncProgress: '',
-        error: e.toString().replaceFirst('ApiException: ', '').replaceFirst('Exception: ', ''),
+        error: e.toString().replaceFirst('Exception: ', ''),
       );
       rethrow;
     }
@@ -612,8 +688,7 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
 
 /// Download service provider.
 final downloadServiceProvider = ChangeNotifierProvider<DownloadService>((ref) {
-  final api = ref.watch(apiClientProvider);
-  return DownloadService(apiClient: api);
+  return DownloadService(client: ref.watch(xtreamClientProvider));
 });
 
 /// Main catalog StateNotifierProvider.
