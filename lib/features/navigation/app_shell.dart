@@ -361,12 +361,12 @@ class _AppShellState extends ConsumerState<AppShell>
                       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
                           Container(
                             width: 36,
                             height: 36,
                             decoration: BoxDecoration(
-                              gradient: AppColors.brandGradient,
                               borderRadius: BorderRadius.circular(10),
                               boxShadow: [
                                 BoxShadow(
@@ -376,16 +376,34 @@ class _AppShellState extends ConsumerState<AppShell>
                                 ),
                               ],
                             ),
-                            child: const Icon(
-                              Icons.tv_rounded,
-                              color: Colors.white,
-                              size: 20,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: Image.asset(
+                                'assets/vod-download-icon.jpeg',
+                                width: 36,
+                                height: 36,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) =>
+                                    Container(
+                                  width: 36,
+                                  height: 36,
+                                  decoration: BoxDecoration(
+                                    gradient: AppColors.brandGradient,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Icon(
+                                    Icons.tv_rounded,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
                           if (isWiderScreen) ...[
                             const SizedBox(width: 10),
-                            RichText(
-                              text: const TextSpan(
+                            Text.rich(
+                              const TextSpan(
                                 style: TextStyle(
                                   fontSize: 17,
                                   fontWeight: FontWeight.bold,
@@ -405,6 +423,7 @@ class _AppShellState extends ConsumerState<AppShell>
                                   ),
                                 ],
                               ),
+                              semanticsLabel: 'VOD Downloader',
                             ),
                           ],
                         ],

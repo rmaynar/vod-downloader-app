@@ -79,6 +79,95 @@ void main() {
 
       expect(tester.takeException(), isNull);
     });
+
+    testWidgets('displays the new icon and title on wider screens without overflow',
+        (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final router = GoRouter(
+        initialLocation: '/',
+        routes: [
+          GoRoute(
+            path: '/',
+            builder: (context, state) =>
+                const AppShell(child: SizedBox.shrink()),
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            catalogProvider.overrideWith(
+              (ref) => _RecordingCatalogNotifier(ref),
+            ),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+
+      // Verify the new icon asset is rendered
+      final iconFinder = find.byWidgetPredicate(
+        (widget) =>
+            widget is Image &&
+            widget.image is AssetImage &&
+            (widget.image as AssetImage).assetName ==
+                'assets/vod-download-icon.jpeg',
+      );
+      expect(iconFinder, findsOneWidget);
+
+      // Verify the VOD Downloader title is displayed alongside the icon
+      expect(find.text('VOD Downloader'), findsOneWidget);
+    });
+
+    testWidgets('displays the new icon on narrow screens without overflow',
+        (tester) async {
+      tester.view.physicalSize = const Size(430, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final router = GoRouter(
+        initialLocation: '/',
+        routes: [
+          GoRoute(
+            path: '/',
+            builder: (context, state) =>
+                const AppShell(child: SizedBox.shrink()),
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            catalogProvider.overrideWith(
+              (ref) => _RecordingCatalogNotifier(ref),
+            ),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+
+      // Icon is rendered on narrow screens
+      final iconFinder = find.byWidgetPredicate(
+        (widget) =>
+            widget is Image &&
+            widget.image is AssetImage &&
+            (widget.image as AssetImage).assetName ==
+                'assets/vod-download-icon.jpeg',
+      );
+      expect(iconFinder, findsOneWidget);
+    });
   });
 
   group('HomeScreen force-sync button', () {
