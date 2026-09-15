@@ -67,6 +67,23 @@ android {
             }
         }
     }
+
+    applicationVariants.all {
+        val variant = this
+        if (variant.buildType.name == "release") {
+            outputs.all {
+                (this as? com.android.build.gradle.internal.api.ApkVariantOutputImpl)?.let { output ->
+                    val abi = output.getFilter("ABI")
+                    val version = variant.versionName
+                    output.outputFileName = if (abi != null) {
+                        "vod-downloader-$version-$abi.apk"
+                    } else {
+                        "vod-downloader-$version.apk"
+                    }
+                }
+            }
+        }
+    }
 }
 
 kotlin {
