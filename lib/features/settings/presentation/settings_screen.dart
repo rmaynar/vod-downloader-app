@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import '../../../core/models/account.dart';
 import '../../../core/models/catalog_stats.dart';
-import '../../../core/providers/backend_config_provider.dart';
+import '../../../core/network/xtream_client.dart';
+import '../../../core/providers/xtream_provider.dart';
 import '../../catalog/providers/catalog_provider.dart';
 import '../../../core/theme/app_colors.dart';
 
@@ -17,19 +19,17 @@ class SettingsScreen extends ConsumerStatefulWidget {
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen>
     with SingleTickerProviderStateMixin {
-  late final TextEditingController _proxyUrlController;
   late final AnimationController _spinController;
 
   bool _isTestingConnection = false;
   bool? _connectionSuccess;
   String? _connectionMessage;
+  bool _connectionIsAuthFailure = false;
+  XtreamUserInfo? _connectionUserInfo;
 
   @override
   void initState() {
     super.initState();
-    final currentProxy = ref.read(backendProxyUrlProvider);
-    _proxyUrlController = TextEditingController(text: currentProxy);
-
     _spinController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 1),
@@ -38,47 +38,62 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
 
   @override
   void dispose() {
-    _proxyUrlController.dispose();
     _spinController.dispose();
     super.dispose();
   }
 
+  /// The Xtream client throws distinct, human-readable messages for rejected
+  /// credentials / inactive accounts (see [XtreamClient.authenticate]) versus
+  /// everything else (timeouts, DNS failures, unreachable host, malformed
+  /// response). Matching on those known messages lets the UI tell the user
+  /// "fix your username/password" apart from "check your network", which
+  /// call for different next steps.
+  bool _isCredentialFailure(XtreamException error) {
+    final message = error.message.toLowerCase();
+    return message.contains('invalid xtream username or password') ||
+        message.contains('account is not active');
+  }
+
   Future<void> _handleTestConnection() async {
+    final client = ref.read(xtreamClientProvider);
+    if (client == null) return;
+
     setState(() {
       _isTestingConnection = true;
       _connectionSuccess = null;
       _connectionMessage = null;
+      _connectionUserInfo = null;
+      _connectionIsAuthFailure = false;
     });
 
-    final targetUrl = _proxyUrlController.text.trim();
-    final api = ref.read(apiClientProvider);
-    final ok = await api.testConnection(customUrl: targetUrl);
-
-    if (mounted) {
-      setState(() {
-        _isTestingConnection = false;
-        _connectionSuccess = ok;
-        _connectionMessage = ok
-            ? 'Connected successfully to backend proxy'
-            : 'Could not reach backend proxy at $targetUrl';
-      });
-    }
-  }
-
-  Future<void> _handleSaveProxy() async {
-    final newUrl = _proxyUrlController.text.trim();
-    if (newUrl.isEmpty) return;
-
-    await ref.read(backendProxyUrlProvider.notifier).setProxyUrl(newUrl);
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Backend proxy configuration saved'),
-          backgroundColor: AppColors.success,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+    try {
+      final userInfo = await client.authenticate();
+      if (mounted) {
+        setState(() {
+          _isTestingConnection = false;
+          _connectionSuccess = true;
+          _connectionMessage = 'Connected successfully to the Xtream provider';
+          _connectionUserInfo = userInfo;
+        });
+      }
+    } on XtreamException catch (e) {
+      if (mounted) {
+        setState(() {
+          _isTestingConnection = false;
+          _connectionSuccess = false;
+          _connectionMessage = e.message;
+          _connectionIsAuthFailure = _isCredentialFailure(e);
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isTestingConnection = false;
+          _connectionSuccess = false;
+          _connectionMessage = 'Unexpected error: $e';
+          _connectionIsAuthFailure = false;
+        });
+      }
     }
   }
 
@@ -230,8 +245,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                   _buildPageHeader(),
                   const SizedBox(height: 24),
 
-                  // Backend Configuration Card
-                  _buildBackendConfigCard(),
+                  // Provider Card
+                  _buildProviderCard(currentAccount),
                   const SizedBox(height: 24),
 
                   // Active Catalog & Storage Stats Card
@@ -310,7 +325,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     );
   }
 
-  Widget _buildBackendConfigCard() {
+  Widget _buildProviderCard(SourceAccount? currentAccount) {
     return Container(
       decoration: BoxDecoration(
         color: AppColors.cardBackground,
@@ -338,7 +353,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
               ),
               SizedBox(width: 10),
               Text(
-                'Backend Proxy Configuration',
+                'Provider',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 16,
@@ -349,7 +364,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
           ),
           const SizedBox(height: 6),
           const Text(
-            'Configure the backend proxy server URL that handles Xtream Codes API requests.',
+            'Active Xtream Codes account and connectivity status.',
             style: TextStyle(
               color: AppColors.textSecondary,
               fontSize: 12,
@@ -357,141 +372,245 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
           ),
           const SizedBox(height: 16),
 
-          // URL TextField
-          TextFormField(
-            controller: _proxyUrlController,
-            style: const TextStyle(color: Colors.white, fontSize: 14),
-            decoration: const InputDecoration(
-              labelText: 'PROXY SERVER URL',
-              hintText: 'http://10.0.2.2:3000',
-            ),
-          ),
-          const SizedBox(height: 12),
+          if (currentAccount == null)
+            _buildNoProviderState()
+          else
+            ..._buildProviderDetails(currentAccount),
+        ],
+      ),
+    );
+  }
 
-          // Presets
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _buildPresetChip(
-                label: 'Android Emulator (10.0.2.2:3000)',
-                url: 'http://10.0.2.2:3000',
-              ),
-              _buildPresetChip(
-                label: 'Localhost (localhost:3000)',
-                url: 'http://localhost:3000',
-              ),
-            ],
+  Widget _buildNoProviderState() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: const Row(
+        children: [
+          Icon(
+            Icons.info_outline_rounded,
+            size: 18,
+            color: AppColors.textMuted,
           ),
-          const SizedBox(height: 16),
-
-          // Connection status pill if tested
-          if (_connectionMessage != null) ...[
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: (_connectionSuccess == true)
-                    ? AppColors.success.withValues(alpha: 0.12)
-                    : AppColors.error.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: (_connectionSuccess == true)
-                      ? AppColors.success.withValues(alpha: 0.35)
-                      : AppColors.error.withValues(alpha: 0.35),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    (_connectionSuccess == true)
-                        ? Icons.check_circle_outline_rounded
-                        : Icons.error_outline_rounded,
-                    size: 18,
-                    color: (_connectionSuccess == true)
-                        ? AppColors.successLight
-                        : AppColors.errorLight,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _connectionMessage!,
-                      style: TextStyle(
-                        color: (_connectionSuccess == true)
-                            ? AppColors.successLight
-                            : AppColors.errorLight,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                ],
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'No active provider account. Log in from the login screen to configure one.',
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 12,
               ),
             ),
-            const SizedBox(height: 14),
-          ],
-
-          // Buttons row
-          Row(
-            children: [
-              OutlinedButton.icon(
-                onPressed: _isTestingConnection ? null : _handleTestConnection,
-                icon: _isTestingConnection
-                    ? const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.network_check_rounded, size: 16),
-                label: Text(_isTestingConnection ? 'Testing...' : 'Test Connection'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.indigoLight,
-                  side: const BorderSide(color: AppColors.border),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                ),
-              ),
-              const Spacer(),
-              ElevatedButton.icon(
-                onPressed: _handleSaveProxy,
-                icon: const Icon(Icons.save_rounded, size: 16),
-                label: const Text('Save Proxy URL'),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                ),
-              ),
-            ],
           ),
         ],
       ),
     );
   }
 
-  Widget _buildPresetChip({required String label, required String url}) {
-    final isSelected = _proxyUrlController.text.trim() == url;
-    return InkWell(
-      onTap: () {
-        setState(() {
-          _proxyUrlController.text = url;
-          _connectionSuccess = null;
-          _connectionMessage = null;
-        });
-      },
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: isSelected ? AppColors.indigo.withValues(alpha: 0.2) : AppColors.surface,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: isSelected ? AppColors.indigo : AppColors.border,
+  List<Widget> _buildProviderDetails(SourceAccount currentAccount) {
+    return [
+      _buildProviderInfoRow(
+        icon: Icons.badge_outlined,
+        label: 'Account',
+        value: currentAccount.displayName,
+      ),
+      const SizedBox(height: 10),
+      _buildProviderInfoRow(
+        icon: Icons.link_rounded,
+        label: 'Server URL',
+        value: currentAccount.url.isNotEmpty ? currentAccount.url : 'Unknown',
+      ),
+      const SizedBox(height: 10),
+      _buildProviderInfoRow(
+        icon: Icons.person_outline_rounded,
+        label: 'Username',
+        value: currentAccount.username,
+      ),
+      const SizedBox(height: 16),
+
+      // Connection status panel if tested
+      if (_connectionMessage != null) ...[
+        _buildConnectionStatusPanel(),
+        const SizedBox(height: 14),
+      ],
+
+      // Test Connection button — this card is read-only otherwise; editing
+      // the account is a re-login handled by the login screen.
+      Align(
+        alignment: Alignment.centerRight,
+        child: OutlinedButton.icon(
+          onPressed: _isTestingConnection ? null : _handleTestConnection,
+          icon: _isTestingConnection
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.network_check_rounded, size: 16),
+          label: Text(_isTestingConnection ? 'Testing...' : 'Test Connection'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppColors.indigoLight,
+            side: const BorderSide(color: AppColors.border),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           ),
         ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isSelected ? AppColors.indigoLight : AppColors.textSecondary,
-            fontSize: 11,
-            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+      ),
+    ];
+  }
+
+  Widget _buildProviderInfoRow({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 16, color: AppColors.textMuted),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 90,
+          child: Text(
+            label,
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 12,
+            ),
           ),
         ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildConnectionStatusPanel() {
+    final isSuccess = _connectionSuccess == true;
+    final color = isSuccess
+        ? AppColors.success
+        : (_connectionIsAuthFailure ? AppColors.warning : AppColors.error);
+    final lightColor = isSuccess
+        ? AppColors.successLight
+        : (_connectionIsAuthFailure ? AppColors.warning : AppColors.errorLight);
+    final icon = isSuccess
+        ? Icons.check_circle_outline_rounded
+        : (_connectionIsAuthFailure
+            ? Icons.lock_outline_rounded
+            : Icons.wifi_off_rounded);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: lightColor),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _connectionMessage!,
+                  style: TextStyle(color: lightColor, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+          if (!isSuccess) ...[
+            const SizedBox(height: 6),
+            Padding(
+              padding: const EdgeInsets.only(left: 26),
+              child: Text(
+                _connectionIsAuthFailure
+                    ? 'Check the username and password for this account, or log in again with the correct credentials.'
+                    : 'Could not reach the server. Check your network connection and that the server URL is correct.',
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 11,
+                ),
+              ),
+            ),
+          ],
+          if (isSuccess && _connectionUserInfo != null) ...[
+            const SizedBox(height: 10),
+            _buildAccountHealth(_connectionUserInfo!),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAccountHealth(XtreamUserInfo info) {
+    final expiry = info.expiresAt != null
+        ? DateFormat('yyyy-MM-dd').format(info.expiresAt!)
+        : 'No expiry';
+
+    return Padding(
+      padding: const EdgeInsets.only(left: 26),
+      child: Wrap(
+        spacing: 14,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          _buildHealthChip('Status', info.status),
+          _buildHealthChip('Expires', expiry),
+          if (info.maxConnections != null)
+            _buildHealthChip('Max connections', '${info.maxConnections}'),
+          if (info.isTrial)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppColors.warning.withValues(alpha: 0.16),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: AppColors.warning.withValues(alpha: 0.4),
+                ),
+              ),
+              child: const Text(
+                'TRIAL',
+                style: TextStyle(
+                  color: AppColors.warning,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.4,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHealthChip(String label, String value) {
+    return RichText(
+      text: TextSpan(
+        style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
+        children: [
+          TextSpan(text: '$label: '),
+          TextSpan(
+            text: value,
+            style: const TextStyle(
+              color: AppColors.successLight,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }
