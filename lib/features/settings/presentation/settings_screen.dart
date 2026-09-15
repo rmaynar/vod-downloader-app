@@ -241,6 +241,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                   _buildPageHeader(),
                   const SizedBox(height: 24),
 
+                  // Download Location Card
+                  _buildDownloadLocationCard(),
+                  const SizedBox(height: 24),
+
                   // Provider Card
                   _buildProviderCard(currentAccount),
                   const SizedBox(height: 24),
@@ -315,6 +319,103 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                 ),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDownloadLocationCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.cardBackground,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.25),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Row(
+            children: [
+              Icon(
+                Icons.folder_outlined,
+                size: 20,
+                color: AppColors.indigoLight,
+              ),
+              SizedBox(width: 10),
+              Text(
+                'Download Location',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Choose where your offline movies and series are saved.',
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.save_alt_rounded, size: 16, color: AppColors.textMuted),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Public Downloads Folder (Default)',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              OutlinedButton(
+                onPressed: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Custom locations coming soon!'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.indigoLight,
+                  side: const BorderSide(color: AppColors.border),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                ),
+                child: const Text('Change'),
+              ),
+            ],
           ),
         ],
       ),
