@@ -13,7 +13,11 @@ Downloads run through a background download manager: they survive the app being
 backgrounded, post progress notifications, support pause/resume via HTTP range requests,
 and land in the device's public Downloads folder.
 
-**Package:** `com.rmaynar.voddownloader` · **Version:** 1.0.0+1
+**Package:** `com.rmaynar.voddownloader` · **Version:** 0.1.0+1
+
+The version is deliberately pre-1.0: the app is feature-complete and usable, but a
+few behaviours have not been verified on real hardware yet (see *Known gaps* below).
+1.0.0 is reserved for when that list is clear.
 
 ## Features
 
@@ -33,8 +37,10 @@ and land in the device's public Downloads folder.
 | JDK | 17 (Android build targets Java 17 / Kotlin JVM 17) |
 | Android SDK | minSdk 24, compileSdk 36 — both inherited from the Flutter toolchain |
 | Gradle | 9.3.1, via the committed wrapper (no manual install needed) |
+| Xcode | Required for macOS builds only |
 
-Check your setup with `flutter doctor`.
+The JDK, Android SDK, and Gradle rows apply to Android builds only — a macOS build needs
+just Flutter and Xcode. Check your setup with `flutter doctor`.
 
 ## Quick start
 
@@ -54,20 +60,23 @@ old.
 
 ## Platform support
 
-Only Android is a supported target. The other platform folders exist and carry the
-correct bundle identifier, but they are not all usable — two plugins gate this:
-`sqflite` (the catalog database, required at startup) and `background_downloader` (the
-download queue).
+Android and macOS are both supported and tested. What gates the remaining platforms is
+`sqflite`, the catalog database the app opens at startup: it ships implementations for
+Android, iOS, and macOS only, and has no pure-Dart fallback.
 
 | Platform | Status |
 | --- | --- |
 | **Android** | **Supported and verified** on an API 37 emulator. Full catalog + download queue. |
-| iOS | Should build — both plugins support iOS — but has never been built or run. Unverified. |
-| macOS | Starts and browses (sqflite works, entitlements are configured), but **downloads do not work**: `background_downloader` 9.6.1 declares no macOS implementation. |
-| Linux / Windows | **Non-functional.** No `sqflite` implementation, so startup fails when the database opens. Scaffolding only. |
-| Web | **Non-functional.** Neither plugin supports web. |
+| **macOS** | **Supported and verified** by running a release `.app`: catalog, download queue, and files landing on disk. |
+| iOS | Should build — every dependency supports iOS — but has never been built or run. Unverified. |
+| Linux / Windows | **Non-functional.** No `sqflite` implementation, so startup fails when the database opens. Downloads would work; the database is the blocker. |
+| Web | **Non-functional.** `sqflite` has no web implementation. |
 
-If you extend desktop support, those two plugins are the things to solve first.
+Downloads work on desktop because `background_downloader` implements macOS, Linux, and
+Windows in pure Dart (`DesktopDownloader`, dispatched at `base_downloader.dart:123`)
+rather than through a platform plugin — so it is absent from the plugin registration
+while still being fully functional. If you want Linux or Windows, `sqflite` is the only
+thing to solve.
 
 ## Building
 
@@ -88,6 +97,13 @@ Install a built APK on a connected device:
 ```bash
 adb install -r build/app/outputs/flutter-apk/app-release.apk
 ```
+
+#### Versioning
+
+Both halves of `version:` in `pubspec.yaml` feed the Android build: `0.1.0` becomes
+`versionName` (a display string, free to move however you like) and `+1` becomes
+`versionCode`. Play requires `versionCode` to strictly increase on every upload, so bump
+the build number for each distributed build — even a rebuild of an unchanged version.
 
 #### Release signing
 
@@ -122,15 +138,18 @@ flutter build ipa --release
 Open `ios/Runner.xcworkspace` in Xcode to set the signing team first. Nothing here has
 been exercised — treat it as a starting point, not a supported path.
 
-### macOS (browsing only, no downloads)
+### macOS
 
 ```bash
-flutter build macos --release
+flutter build macos --release     # .app bundle
 flutter run -d macos
 ```
 
-The sandbox entitlements in `macos/Runner/*.entitlements` already grant outgoing network
-access and read/write to the user's Downloads folder.
+The built bundle is at `build/macos/Build/Products/Release/VOD Downloader.app`.
+
+The sandbox entitlements in `macos/Runner/*.entitlements` grant outgoing network access
+and read/write to the user's Downloads folder — both are required, since the app
+downloads from an arbitrary user-entered host and moves finished files into `~/Downloads`.
 
 ## Testing
 
@@ -172,14 +191,42 @@ Never commit real credentials into a test file.
 
 ## Where downloads go
 
-On Android, completed downloads are moved into the public Downloads folder
-(`/storage/emulated/0/Download`) so other apps and a USB file browser can see them.
-The app requests notification permission on first run to show download progress; denying
-it does not stop downloads, only their notifications.
+Completed downloads are moved out of app-private storage into the platform's shared
+Downloads folder, so other apps and a file browser can see them:
+
+| Platform | Destination |
+| --- | --- |
+| Android | `/storage/emulated/0/Download` |
+| macOS | `~/Downloads` |
+
+On Android the app requests notification permission on first run to show download
+progress; denying it does not stop downloads, only their notifications.
 
 Downloads are deliberately **serialised, one at a time**. Xtream providers commonly cap an
 account at a single simultaneous connection, and a second concurrent transfer is simply
 refused by the server, so extra downloads queue and wait their turn.
+
+## Known gaps
+
+The app is feature-complete and in daily-usable shape, but these have not been confirmed
+on real hardware and are the reason the version is still pre-1.0:
+
+- **Task restoration across an app kill.** The persistence layer is on disk and unit-tested,
+  but a kill/restore cycle has never been observed actually resuming a download.
+- **The v1→v2 database migration as a real upgrade.** Covered by unit tests against a
+  synthesised v1 database, never run against a database written by a pre-migration build
+  of the app. This is the highest-risk item: a bad migration hits an existing user's
+  cached catalog.
+- **The Android progress notification appearing in the shade.** The code path runs; the
+  notification itself has not been seen.
+- **A full ~40k-item sync on Android without an ANR.** Chunked writes exist specifically
+  to prevent this, and the sync has been exercised at that scale, but not on a
+  low-end device.
+- **iOS, entirely.** Never built or run.
+
+Verified working: catalog sync and browsing at ~40k movies / ~11k series, and downloads
+running to completion with files landing in the shared Downloads folder on both Android
+and macOS.
 
 ## Security notes
 
