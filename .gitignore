@@ -55,3 +55,6 @@ app.*.map.json
 # and the test code that reads it are safe to commit; only the actual
 # secret values are excluded here.
 integration_test/local/secrets.properties
+
+# Local backlog
+BACKLOG.md
