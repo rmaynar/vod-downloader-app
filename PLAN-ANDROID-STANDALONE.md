@@ -1,5 +1,39 @@
 # Standalone Android VOD Downloader — Parallel Migration Plan
 
+---
+
+## STATUS: implementation complete (2026-09-15)
+
+All batches landed on `standalone-xtream-migration`. `flutter analyze` is clean,
+**100 tests pass** (from 19 at baseline), the debug APK builds, and the app runs on an
+API 37 emulator.
+
+**Verified on-device**
+- App launches, renders, and the backend proxy URL field is gone from login.
+- A login against an unreachable server reports
+  `Could not connect to Xtream server at http://127.0.0.1:1` — a direct dial with no
+  backend involved, no exception class name leaked, no credentials in the message.
+- `moveToSharedStorage` places completed downloads in `/storage/emulated/0/Download`
+  at full size (checked with `adb`, not from the library's return value).
+- Pause/resume resumes at the correct byte offset (`Range: bytes=17825792-`).
+
+**Known-unverified — needs a real Xtream account**
+- Login against a live provider, and the ~40k-item sync completing without ANR.
+- A real movie/episode download running to completion and landing in Downloads.
+- Task restoration across an app kill (infrastructure is on disk; a kill/restore cycle
+  was never observed succeeding).
+- The progress notification actually appearing in the shade.
+- The v1→v2 database migration against a database written by the pre-migration build
+  (covered by unit tests, never exercised as a real app upgrade).
+
+**Deliberately out of scope**
+- iOS/macOS/Linux/Windows/web still carry the old bundle identifiers; only the Android
+  target was renamed.
+- `series_screen.dart` has a pre-existing header-row overflow at narrow widths, found
+  while working but not introduced by this migration. Not fixed.
+
+---
+
 > On approval this document is also written into the repo as `PLAN-ANDROID-STANDALONE.md`
 > (plan mode only permits editing this scratch plan file). The existing `PLAN.md`
 > describes the completed backend-coupled phase and gets a pointer to this one.
