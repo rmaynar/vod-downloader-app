@@ -191,34 +191,42 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: const [
-                              Icon(Icons.tv_rounded, size: 28, color: AppColors.primary),
-                              SizedBox(width: 10),
-                              Text(
-                                'TV Shows',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: -0.5,
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: const [
+                                Icon(Icons.tv_rounded, size: 28, color: AppColors.primary),
+                                SizedBox(width: 10),
+                                Flexible(
+                                  child: Text(
+                                    'TV Shows',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: -0.5,
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'Browse and stream television shows and series',
-                            style: TextStyle(
-                              color: AppColors.textSecondary,
-                              fontSize: 13,
+                              ],
                             ),
-                          ),
-                        ],
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Browse and stream television shows and series',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: AppColors.textSecondary,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
+                      const SizedBox(width: 12),
 
                       // Total Count Pill
                       Container(

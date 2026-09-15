@@ -71,12 +71,13 @@ List<CategoryItem> _buildCategories(String type) {
 List<String> _cardNames(WidgetTester tester) =>
     tester.widgetList<MediaCard>(find.byType(MediaCard)).map((c) => c.item.name).toList();
 
-/// Widens the test surface so the screens' header/filter-bar rows (sized
-/// for desktop layouts) don't overflow once the "Filtered: X of Y" text
-/// appears — unrelated to the filter/sort/debounce behaviour under test.
-void _useWideViewport(WidgetTester tester) {
-  tester.view.physicalSize = const Size(1600, 1200);
-  tester.view.devicePixelRatio = 1.0;
+/// Runs at a realistic phone width (matches the narrow-width regression in
+/// app_shell_and_home_screen_test.dart: 1280 physical / 3.0 density) so
+/// these filter/sort/debounce tests also exercise the layout at the size
+/// real phones use, rather than an artificially wide surface.
+void _usePhoneViewport(WidgetTester tester) {
+  tester.view.physicalSize = const Size(1280, 2856);
+  tester.view.devicePixelRatio = 3.0;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
 }
@@ -86,7 +87,7 @@ Future<void> _pumpMoviesScreen(
   required List<MediaItem> movies,
   required List<CategoryItem> categories,
 }) async {
-  _useWideViewport(tester);
+  _usePhoneViewport(tester);
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
@@ -105,7 +106,7 @@ Future<void> _pumpSeriesScreen(
   required List<MediaItem> series,
   required List<CategoryItem> categories,
 }) async {
-  _useWideViewport(tester);
+  _usePhoneViewport(tester);
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
