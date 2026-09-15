@@ -3,12 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:nodecast_catalog_flutter/core/models/category_item.dart';
-import 'package:nodecast_catalog_flutter/core/models/media_item.dart';
-import 'package:nodecast_catalog_flutter/features/catalog/presentation/movies_screen.dart';
-import 'package:nodecast_catalog_flutter/features/catalog/presentation/series_screen.dart';
-import 'package:nodecast_catalog_flutter/features/catalog/presentation/widgets/media_card.dart';
-import 'package:nodecast_catalog_flutter/features/catalog/providers/catalog_provider.dart';
+import 'package:vod_downloader/core/models/category_item.dart';
+import 'package:vod_downloader/core/models/media_item.dart';
+import 'package:vod_downloader/features/catalog/presentation/movies_screen.dart';
+import 'package:vod_downloader/features/catalog/presentation/series_screen.dart';
+import 'package:vod_downloader/features/catalog/presentation/widgets/media_card.dart';
+import 'package:vod_downloader/features/catalog/providers/catalog_provider.dart';
 
 /// A CatalogNotifier stand-in that skips real network/DB init (like
 /// _RecordingCatalogNotifier in app_shell_and_home_screen_test.dart) and

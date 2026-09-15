@@ -1,10 +1,10 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:nodecast_catalog_flutter/core/models/media_item.dart';
-import 'package:nodecast_catalog_flutter/core/models/series_details.dart';
-import 'package:nodecast_catalog_flutter/core/network/xtream_client.dart';
-import 'package:nodecast_catalog_flutter/core/services/download_service.dart';
+import 'package:vod_downloader/core/models/media_item.dart';
+import 'package:vod_downloader/core/models/series_details.dart';
+import 'package:vod_downloader/core/network/xtream_client.dart';
+import 'package:vod_downloader/core/services/download_service.dart';
 
 /// Credentials used across the suite. The password is deliberately a string
 /// that would be obvious if it ever leaked into an error message.

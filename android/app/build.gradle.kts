@@ -20,7 +20,7 @@ if (hasKeystoreProperties) {
 }
 
 android {
-    namespace = "com.example.nodecast_catalog_flutter"
+    namespace = "com.rmaynar.voddownloader"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -30,8 +30,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.nodecast_catalog_flutter"
+        applicationId = "com.rmaynar.voddownloader"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

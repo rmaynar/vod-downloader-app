@@ -1,8 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:nodecast_catalog_flutter/core/database/database_service.dart';
-import 'package:nodecast_catalog_flutter/core/models/media_item.dart';
+import 'package:vod_downloader/core/database/database_service.dart';
+import 'package:vod_downloader/core/models/media_item.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 

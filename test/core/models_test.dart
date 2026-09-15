@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:nodecast_catalog_flutter/core/models/category_item.dart';
-import 'package:nodecast_catalog_flutter/core/models/media_item.dart';
-import 'package:nodecast_catalog_flutter/core/models/series_details.dart';
-import 'package:nodecast_catalog_flutter/core/models/source_account.dart';
+import 'package:vod_downloader/core/models/category_item.dart';
+import 'package:vod_downloader/core/models/media_item.dart';
+import 'package:vod_downloader/core/models/series_details.dart';
+import 'package:vod_downloader/core/models/source_account.dart';
 
 void main() {
   group('MediaItem', () {

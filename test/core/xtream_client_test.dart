@@ -1,8 +1,8 @@
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:nodecast_catalog_flutter/core/models/xtream_source.dart';
-import 'package:nodecast_catalog_flutter/core/network/xtream_client.dart';
+import 'package:vod_downloader/core/models/xtream_source.dart';
+import 'package:vod_downloader/core/network/xtream_client.dart';
 
 class MockAdapter implements HttpClientAdapter {
   late ResponseBody Function(RequestOptions options) handler;

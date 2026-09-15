@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
-import 'package:nodecast_catalog_flutter/main.dart';
+import 'package:vod_downloader/main.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
@@ -99,8 +99,15 @@ void main() {
     final deadline = DateTime.now().add(const Duration(seconds: 30));
     while (true) {
       await tester.pump(const Duration(milliseconds: 250));
+      // The login screen shows XtreamException.message verbatim, so there is
+      // no class-name prefix to match on any more. Look for the known
+      // provider-side failure wordings instead.
       final errorFinder = find.byWidgetPredicate(
-        (w) => w is Text && (w.data?.startsWith('ApiException') ?? false),
+        (w) =>
+            w is Text &&
+            (w.data?.contains('Invalid Xtream username or password') == true ||
+                w.data?.contains('is not active') == true ||
+                w.data?.contains('Could not connect') == true),
       );
       if (errorFinder.evaluate().isNotEmpty) {
         final errorText = tester.widget<Text>(errorFinder).data;
