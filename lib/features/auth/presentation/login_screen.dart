@@ -43,6 +43,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   @override
+  void didUpdateWidget(covariant LoginScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialMode != oldWidget.initialMode) {
+      final savedAccounts = ref.read(catalogProvider).savedAccounts;
+      setState(() {
+        if (widget.initialMode == 'add' || savedAccounts.isEmpty) {
+          _activeTab = _AuthTab.add;
+        } else {
+          _activeTab = _AuthTab.accounts;
+        }
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _serverUrlController.dispose();
     _usernameController.dispose();
@@ -187,6 +202,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final syncProgress = catalogState.syncProgress;
 
     final errorMessage = _localError ?? catalogState.error;
+    final canGoBack = Navigator.canPop(context) ||
+        (currentSourceId != null && currentSourceId.isNotEmpty);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -213,6 +230,30 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               ),
             ),
           ),
+
+          if (canGoBack)
+            SafeArea(
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: IconButton(
+                    icon: const Icon(
+                      Icons.arrow_back,
+                      color: AppColors.textSecondary,
+                    ),
+                    tooltip: 'Back',
+                    onPressed: () {
+                      if (Navigator.canPop(context)) {
+                        Navigator.of(context).pop();
+                      } else {
+                        context.go('/movies');
+                      }
+                    },
+                  ),
+                ),
+              ),
+            ),
 
           SafeArea(
             child: Center(
@@ -510,13 +551,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text(
-              'SELECT AN ACCOUNT TO LOAD',
-              style: TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.8,
+            const Expanded(
+              child: Text(
+                'SELECT AN ACCOUNT TO LOAD',
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.8,
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
             TextButton.icon(

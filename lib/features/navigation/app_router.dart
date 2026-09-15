@@ -50,11 +50,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         return '/login';
       }
 
-      // If authenticated and on /login, redirect to /movies
-      if (isAuthenticated && isLoggingIn) {
-        return '/movies';
-      }
-
       return null;
     },
     routes: [

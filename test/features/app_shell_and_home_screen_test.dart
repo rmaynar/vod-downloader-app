@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:vod_downloader/core/models/source_account.dart';
 import 'package:vod_downloader/features/catalog/presentation/home_screen.dart';
 import 'package:vod_downloader/features/catalog/providers/catalog_provider.dart';
+import 'package:vod_downloader/features/navigation/app_router.dart';
 import 'package:vod_downloader/features/navigation/app_shell.dart';
 
 /// A CatalogNotifier stand-in that skips real network/DB init and records
@@ -197,6 +198,168 @@ void main() {
       // sourceId is intentionally omitted by the caller so syncCatalog
       // falls back to the currently active source.
       expect(fakeNotifier.lastSourceIdArg, isNull);
+    });
+  });
+
+  group('Account switcher navigation and router', () {
+    testWidgets('tapping "Add Another Account" opens /login?mode=add',
+        (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      String? lastNavigatedPath;
+
+      final router = GoRouter(
+        initialLocation: '/',
+        routes: [
+          GoRoute(
+            path: '/login',
+            builder: (context, state) {
+              lastNavigatedPath = state.uri.toString();
+              return Scaffold(
+                body: Text('Login Screen: ${state.uri.queryParameters['mode']}'),
+              );
+            },
+          ),
+          ShellRoute(
+            builder: (context, state, child) => AppShell(child: child),
+            routes: [
+              GoRoute(
+                path: '/',
+                builder: (context, state) => const Text('Home Screen'),
+              ),
+            ],
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            catalogProvider.overrideWith(
+              (ref) => _RecordingCatalogNotifier(ref),
+            ),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Open the account switcher dropdown
+      await tester.tap(find.text('Test User'));
+      await tester.pumpAndSettle();
+
+      // Verify bottom sheet is open with both buttons
+      expect(find.text('Add Another Account'), findsOneWidget);
+      expect(find.text('Manage All Accounts'), findsOneWidget);
+
+      // Tap 'Add Another Account'
+      await tester.tap(find.text('Add Another Account'));
+      await tester.pumpAndSettle();
+
+      expect(lastNavigatedPath, '/login?mode=add');
+      expect(find.text('Login Screen: add'), findsOneWidget);
+    });
+
+    testWidgets('tapping "Manage All Accounts" opens /login',
+        (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      String? lastNavigatedPath;
+
+      final router = GoRouter(
+        initialLocation: '/',
+        routes: [
+          GoRoute(
+            path: '/login',
+            builder: (context, state) {
+              lastNavigatedPath = state.uri.toString();
+              return Scaffold(
+                body: Text('Login Screen: ${state.uri.queryParameters['mode']}'),
+              );
+            },
+          ),
+          ShellRoute(
+            builder: (context, state, child) => AppShell(child: child),
+            routes: [
+              GoRoute(
+                path: '/',
+                builder: (context, state) => const Text('Home Screen'),
+              ),
+            ],
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            catalogProvider.overrideWith(
+              (ref) => _RecordingCatalogNotifier(ref),
+            ),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Open the account switcher dropdown
+      await tester.tap(find.text('Test User'));
+      await tester.pumpAndSettle();
+
+      // Tap 'Manage All Accounts'
+      await tester.tap(find.text('Manage All Accounts'));
+      await tester.pumpAndSettle();
+
+      expect(lastNavigatedPath, '/login');
+      expect(find.text('Login Screen: null'), findsOneWidget);
+    });
+
+    testWidgets(
+        'appRouterProvider allows authenticated access to /login and /login?mode=add',
+        (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final container = ProviderContainer(
+        overrides: [
+          catalogProvider.overrideWith(
+            (ref) => _RecordingCatalogNotifier(ref),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final router = container.read(appRouterProvider);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Authenticated user navigating to /login
+      router.go('/login');
+      await tester.pumpAndSettle();
+      expect(router.routerDelegate.currentConfiguration.uri.path, '/login');
+
+      // Authenticated user navigating to /login?mode=add
+      router.go('/login?mode=add');
+      await tester.pumpAndSettle();
+      expect(router.routerDelegate.currentConfiguration.uri.path, '/login');
+      expect(
+        router.routerDelegate.currentConfiguration.uri.queryParameters['mode'],
+        'add',
+      );
     });
   });
 }

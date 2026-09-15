@@ -5,6 +5,11 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../catalog/providers/catalog_provider.dart';
 
+enum _AccountMenuAction {
+  addAccount,
+  manageAccounts,
+}
+
 /// App shell scaffold providing responsive navigation (Top Bar + BottomNav / NavRail)
 /// for all authenticated routes in the application.
 class AppShell extends ConsumerStatefulWidget {
@@ -112,10 +117,14 @@ class _AppShellState extends ConsumerState<AppShell>
     }
   }
 
-  void _showAccountSwitcher(BuildContext context, CatalogState catalogState) {
-    showModalBottomSheet(
+  Future<void> _showAccountSwitcher(
+    BuildContext context,
+    CatalogState catalogState,
+  ) async {
+    final action = await showModalBottomSheet<_AccountMenuAction>(
       context: context,
       backgroundColor: AppColors.cardBackground,
+      constraints: const BoxConstraints(maxWidth: 600),
       shape: const RoundedRectangleBorder(
         side: BorderSide(color: AppColors.border),
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -268,8 +277,7 @@ class _AppShellState extends ConsumerState<AppShell>
                     ),
                   ),
                   onTap: () {
-                    Navigator.of(ctx).pop();
-                    context.push('/login?mode=add');
+                    Navigator.of(ctx).pop(_AccountMenuAction.addAccount);
                   },
                 ),
                 ListTile(
@@ -298,8 +306,7 @@ class _AppShellState extends ConsumerState<AppShell>
                     ),
                   ),
                   onTap: () {
-                    Navigator.of(ctx).pop();
-                    context.push('/login');
+                    Navigator.of(ctx).pop(_AccountMenuAction.manageAccounts);
                   },
                 ),
               ],
@@ -308,6 +315,15 @@ class _AppShellState extends ConsumerState<AppShell>
         );
       },
     );
+
+    if (!context.mounted || action == null) return;
+
+    switch (action) {
+      case _AccountMenuAction.addAccount:
+        context.push('/login?mode=add');
+      case _AccountMenuAction.manageAccounts:
+        context.push('/login');
+    }
   }
 
   @override
