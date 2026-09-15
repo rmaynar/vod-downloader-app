@@ -43,7 +43,8 @@ class _AppShellState extends ConsumerState<AppShell>
     if (location == '/') return 0;
     if (location.startsWith('/movies')) return 1;
     if (location.startsWith('/series')) return 2;
-    if (location.startsWith('/settings')) return 3;
+    if (location.startsWith('/downloads')) return 3;
+    if (location.startsWith('/settings')) return 4;
     return 0;
   }
 
@@ -59,6 +60,9 @@ class _AppShellState extends ConsumerState<AppShell>
         context.go('/series');
         break;
       case 3:
+        context.go('/downloads');
+        break;
+      case 4:
         context.go('/settings');
         break;
     }
@@ -665,6 +669,11 @@ class _AppShellState extends ConsumerState<AppShell>
                         label: Text('TV Shows'),
                       ),
                       NavigationRailDestination(
+                        icon: Icon(Icons.download_outlined),
+                        selectedIcon: Icon(Icons.download_rounded),
+                        label: Text('Downloads'),
+                      ),
+                      NavigationRailDestination(
                         icon: Icon(Icons.settings_outlined),
                         selectedIcon: Icon(Icons.settings_rounded),
                         label: Text('Settings'),
@@ -714,6 +723,12 @@ class _AppShellState extends ConsumerState<AppShell>
                     selectedIcon:
                         Icon(Icons.tv_rounded, color: AppColors.indigoLight),
                     label: 'TV Shows',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.download_outlined, color: AppColors.textMuted),
+                    selectedIcon:
+                        Icon(Icons.download_rounded, color: AppColors.indigoLight),
+                    label: 'Downloads',
                   ),
                   NavigationDestination(
                     icon: Icon(Icons.settings_outlined, color: AppColors.textMuted),

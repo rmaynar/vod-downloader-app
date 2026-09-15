@@ -7,6 +7,7 @@ import '../catalog/presentation/home_screen.dart';
 import '../catalog/presentation/movies_screen.dart';
 import '../catalog/presentation/series_screen.dart';
 import '../catalog/providers/catalog_provider.dart';
+import '../downloads/presentation/downloads_screen.dart';
 import '../settings/presentation/settings_screen.dart';
 import 'app_shell.dart';
 
@@ -80,6 +81,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             builder: (context, state) => const SeriesScreen(),
           ),
           GoRoute(
+            path: '/downloads',
+            builder: (context, state) => const DownloadsScreen(),
+          ),
+          GoRoute(
             path: '/settings',
             builder: (context, state) => const SettingsScreen(),
           ),
@@ -117,6 +122,10 @@ GoRouter get appRouter {
           GoRoute(
             path: '/series',
             builder: (context, state) => const SeriesScreen(),
+          ),
+          GoRoute(
+            path: '/downloads',
+            builder: (context, state) => const DownloadsScreen(),
           ),
           GoRoute(
             path: '/settings',

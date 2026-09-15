@@ -45,6 +45,10 @@ dependencies:
   intl: ^0.19.0
   shared_preferences: ^2.3.3
   url_launcher: ^6.3.1
+  # Download queue: foreground service, progress notifications, HTTP Range
+  # pause/resume, and moveToSharedStorage() for the public Downloads folder.
+  # Verified on an API 37 emulator before adoption.
+  background_downloader: ^9.6.1
 
 dev_dependencies:
   flutter_test:

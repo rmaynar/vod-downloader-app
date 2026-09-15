@@ -1,10 +1,10 @@
-import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/models/media_item.dart';
 import '../../../../core/theme/app_theme.dart';
-import '../../providers/catalog_provider.dart';
+import '../../../downloads/download_queue_provider.dart';
+import '../../../downloads/download_task.dart';
 import 'fallback_poster.dart';
 
 class MediaCard extends ConsumerStatefulWidget {
@@ -25,16 +25,8 @@ class MediaCard extends ConsumerStatefulWidget {
 
 class _MediaCardState extends ConsumerState<MediaCard> {
   bool _isHovered = false;
-  bool _isDownloaded = false;
-  Timer? _downloadFeedbackTimer;
 
-  @override
-  void dispose() {
-    _downloadFeedbackTimer?.cancel();
-    super.dispose();
-  }
-
-  void _handleDownloadClick(dynamic sourceId) {
+  void _handleDownloadTap(DownloadTask? task) {
     final resolvedType = widget.type ?? widget.item.type;
 
     if (resolvedType == MediaType.series) {
@@ -43,35 +35,111 @@ class _MediaCardState extends ConsumerState<MediaCard> {
       return;
     }
 
-    // For movies, start download
-    if (sourceId != null) {
-      ref.read(downloadServiceProvider).triggerDownload(
-            sourceId: sourceId,
-            type: MediaType.movie,
-            itemId: widget.item.id,
-            container: widget.item.containerExtension ?? 'mp4',
-            title: widget.item.name,
-          );
+    if (task != null && task.status == DownloadStatus.failed) {
+      ref.read(downloadQueueProvider.notifier).retry(task.id);
+      return;
+    }
 
-      setState(() {
-        _isDownloaded = true;
-      });
+    if (task != null) {
+      // Already queued/running/complete — tapping again does nothing.
+      return;
+    }
 
-      _downloadFeedbackTimer?.cancel();
-      _downloadFeedbackTimer = Timer(const Duration(milliseconds: 2500), () {
-        if (mounted) {
-          setState(() {
-            _isDownloaded = false;
-          });
-        }
-      });
+    ref.read(downloadQueueProvider.notifier).enqueueMovie(item: widget.item);
+  }
+
+  Color _downloadBgColor(DownloadStatus? status) {
+    switch (status) {
+      case DownloadStatus.complete:
+        return AppColors.emerald;
+      case DownloadStatus.failed:
+        return AppColors.red;
+      case DownloadStatus.running:
+      case DownloadStatus.queued:
+      case DownloadStatus.paused:
+        return AppColors.primary;
+      case DownloadStatus.canceled:
+      case null:
+        return Colors.black.withValues(alpha: 0.78);
+    }
+  }
+
+  Color _downloadBorderColor(DownloadStatus? status) {
+    switch (status) {
+      case DownloadStatus.complete:
+        return AppColors.emerald;
+      case DownloadStatus.failed:
+        return AppColors.red;
+      case DownloadStatus.running:
+      case DownloadStatus.queued:
+      case DownloadStatus.paused:
+        return AppColors.primary;
+      case DownloadStatus.canceled:
+      case null:
+        return Colors.white.withValues(alpha: 0.25);
+    }
+  }
+
+  /// Icon/indicator for the current download state. `running` renders a
+  /// real determinate ring driven by [DownloadTask.progress] — never an
+  /// indeterminate spinner, since these are multi-GB files and a spinner
+  /// tells the user nothing about how far along they are.
+  Widget _buildDownloadIcon(DownloadTask? task) {
+    switch (task?.status) {
+      case DownloadStatus.queued:
+        return const Icon(
+          Icons.schedule_rounded,
+          key: ValueKey('queued'),
+          color: AppColors.textLight,
+          size: 16,
+        );
+      case DownloadStatus.running:
+        return SizedBox(
+          key: const ValueKey('running'),
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(
+            value: task!.progress.clamp(0.0, 1.0),
+            strokeWidth: 2.4,
+            color: Colors.white,
+            backgroundColor: Colors.white.withValues(alpha: 0.2),
+          ),
+        );
+      case DownloadStatus.paused:
+        return const Icon(
+          Icons.pause_rounded,
+          key: ValueKey('paused'),
+          color: Colors.white,
+          size: 18,
+        );
+      case DownloadStatus.complete:
+        return const Icon(
+          Icons.check_rounded,
+          key: ValueKey('check'),
+          color: Colors.white,
+          size: 18,
+        );
+      case DownloadStatus.failed:
+        return const Icon(
+          Icons.refresh_rounded,
+          key: ValueKey('failed'),
+          color: Colors.white,
+          size: 18,
+        );
+      case DownloadStatus.canceled:
+      case null:
+        return const Icon(
+          Icons.download_rounded,
+          key: ValueKey('download'),
+          color: AppColors.textLight,
+          size: 18,
+        );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final catalogState = ref.watch(catalogProvider);
-    final currentSourceId = catalogState.currentSourceId;
+    final downloadTask = ref.watch(downloadTaskProvider(widget.item.id));
 
     final resolvedType = widget.type ?? widget.item.type;
     final formattedRating = widget.item.formattedRating;
@@ -252,49 +320,37 @@ class _MediaCardState extends ConsumerState<MediaCard> {
                         Positioned(
                           bottom: 8,
                           right: 8,
-                          child: GestureDetector(
-                            onTap: () => _handleDownloadClick(currentSourceId),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 200),
-                              width: 34,
-                              height: 34,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: _isDownloaded
-                                    ? AppColors.emerald
-                                    : Colors.black.withValues(alpha: 0.78),
-                                border: Border.all(
-                                  color: _isDownloaded
-                                      ? AppColors.emerald
-                                      : Colors.white.withValues(alpha: 0.25),
-                                  width: 1.2,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: _isDownloaded
-                                        ? AppColors.emerald.withValues(alpha: 0.4)
-                                        : Colors.black.withValues(alpha: 0.5),
-                                    blurRadius: 6,
-                                    offset: const Offset(0, 2),
+                          child: Tooltip(
+                            message: downloadTask?.status == DownloadStatus.failed
+                                ? (downloadTask?.error ?? 'Download failed — tap to retry')
+                                : '',
+                            child: GestureDetector(
+                              onTap: () => _handleDownloadTap(downloadTask),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                width: 34,
+                                height: 34,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: _downloadBgColor(downloadTask?.status),
+                                  border: Border.all(
+                                    color: _downloadBorderColor(downloadTask?.status),
+                                    width: 1.2,
                                   ),
-                                ],
-                              ),
-                              child: Center(
-                                child: AnimatedSwitcher(
-                                  duration: const Duration(milliseconds: 150),
-                                  child: _isDownloaded
-                                      ? const Icon(
-                                          Icons.check_rounded,
-                                          key: ValueKey('check'),
-                                          color: Colors.white,
-                                          size: 18,
-                                        )
-                                      : const Icon(
-                                          Icons.download_rounded,
-                                          key: ValueKey('download'),
-                                          color: AppColors.textLight,
-                                          size: 18,
-                                        ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: _downloadBgColor(downloadTask?.status)
+                                          .withValues(alpha: 0.4),
+                                      blurRadius: 6,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: Center(
+                                  child: AnimatedSwitcher(
+                                    duration: const Duration(milliseconds: 150),
+                                    child: _buildDownloadIcon(downloadTask),
+                                  ),
                                 ),
                               ),
                             ),
