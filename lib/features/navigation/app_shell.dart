@@ -447,8 +447,8 @@ class _AppShellState extends ConsumerState<AppShell>
                     ),
                   ),
 
-                  // Desktop/Tablet Navigation Links (visible when wide)
-                  if (isWiderScreen) ...[
+                  // Desktop Navigation Links (visible when screenWidth >= 900)
+                  if (screenWidth >= 900) ...[
                     const SizedBox(width: 24),
                     _HeaderNavLink(
                       label: 'Movies',
@@ -495,7 +495,9 @@ class _AppShellState extends ConsumerState<AppShell>
                             Flexible(
                               child: ConstrainedBox(
                                 constraints: BoxConstraints(
-                                  maxWidth: screenWidth < 500 ? 90 : 160,
+                                  maxWidth: screenWidth < 380
+                                      ? 55
+                                      : (screenWidth < 500 ? 90 : 160),
                                 ),
                                 child: Text(
                                   catalogState.syncProgress.isNotEmpty
@@ -551,7 +553,9 @@ class _AppShellState extends ConsumerState<AppShell>
                           const SizedBox(width: 6),
                           ConstrainedBox(
                             constraints: BoxConstraints(
-                              maxWidth: screenWidth < 450 ? 80 : 130,
+                              maxWidth: screenWidth < 380
+                                  ? 50
+                                  : (screenWidth < 450 ? 80 : 130),
                             ),
                             child: Text(
                               accountDisplayName,
