@@ -47,6 +47,9 @@ app.*.map.json
 # Widget Preview related
 .widget_preview/
 
+# Staged release artifacts (see .claude/skills/building-release-artifacts)
+/dist/
+
 # Real account credentials for local diagnostic tests - personal-machine
 # only, never commit. The loader template (application-real.properties)
 # and the test code that reads it are safe to commit; only the actual
