@@ -115,7 +115,13 @@ class _MediaDetailsModalState extends ConsumerState<MediaDetailsModal> {
       ref.read(downloadQueueProvider.notifier).retry(task.id);
       return;
     }
-    if (task != null) return; // Already queued/running/complete.
+    if (task != null && task.status == DownloadStatus.queued) {
+      ref.read(downloadQueueProvider.notifier).cancel(task.id);
+      return;
+    }
+    // If it's running, paused, or complete, do nothing.
+    // If it's canceled, fall through to re-enqueue.
+    if (task != null && task.status != DownloadStatus.canceled) return;
 
     ref.read(downloadQueueProvider.notifier).enqueueMovie(item: widget.item);
   }
@@ -125,7 +131,11 @@ class _MediaDetailsModalState extends ConsumerState<MediaDetailsModal> {
       ref.read(downloadQueueProvider.notifier).retry(task.id);
       return;
     }
-    if (task != null) return; // Already queued/running/complete.
+    if (task != null && task.status == DownloadStatus.queued) {
+      ref.read(downloadQueueProvider.notifier).cancel(task.id);
+      return;
+    }
+    if (task != null && task.status != DownloadStatus.canceled) return;
 
     ref.read(downloadQueueProvider.notifier).enqueueEpisode(
           episode: episode,

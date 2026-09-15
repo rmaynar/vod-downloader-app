@@ -27,7 +27,12 @@ class DownloadsScreen extends ConsumerWidget {
     final tasks = ref.watch(downloadQueueProvider);
     final notifier = ref.read(downloadQueueProvider.notifier);
 
-    final active = tasks.where((t) => !_isFinished(t.status)).toList();
+    final activeRaw = tasks.where((t) => !_isFinished(t.status)).toList();
+    final active = [
+      ...activeRaw.where((t) => t.status == DownloadStatus.running),
+      ...activeRaw.where((t) => t.status == DownloadStatus.paused),
+      ...activeRaw.where((t) => t.status == DownloadStatus.queued),
+    ];
     final finished = tasks.where((t) => _isFinished(t.status)).toList();
     final hasFinished = finished.isNotEmpty;
 
@@ -528,7 +533,7 @@ class _DownloadActions extends StatelessWidget {
         buttons.add(_ActionButton(
           icon: Icons.delete_outline_rounded,
           label: 'Dismiss',
-          onPressed: () => notifier.cancel(task.id),
+          onPressed: () => notifier.dismiss(task.id),
         ));
         break;
 
@@ -541,7 +546,7 @@ class _DownloadActions extends StatelessWidget {
         buttons.add(_ActionButton(
           icon: Icons.delete_outline_rounded,
           label: 'Dismiss',
-          onPressed: () => notifier.cancel(task.id),
+          onPressed: () => notifier.dismiss(task.id),
         ));
         break;
 
@@ -549,7 +554,7 @@ class _DownloadActions extends StatelessWidget {
         buttons.add(_ActionButton(
           icon: Icons.delete_outline_rounded,
           label: 'Dismiss',
-          onPressed: () => notifier.cancel(task.id),
+          onPressed: () => notifier.dismiss(task.id),
         ));
         break;
     }
