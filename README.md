@@ -16,7 +16,7 @@ requests, and land in the device's shared Downloads folder where any other app c
 them. Because Xtream providers commonly cap an account at one simultaneous connection,
 downloads are deliberately serialised — one at a time, the rest queued.
 
-**Package:** `com.rmaynar.voddownloader` · **Version:** 0.1.0+1 ·
+**Package:** `com.rmaynar.voddownloader` · **Version:** 0.2.0+2 ·
 **Platforms:** Android, macOS
 
 The version is deliberately pre-1.0: the app is feature-complete and in daily use, but a
