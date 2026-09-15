@@ -1,34 +1,71 @@
-# VOD Downloader
+# 🎬 VOD Downloader
 
-A Flutter app for browsing and downloading movies and series from an
-[Xtream Codes](https://en.wikipedia.org/wiki/IPTV) IPTV provider.
+**Browse and download movies and series from your own
+[Xtream Codes](https://en.wikipedia.org/wiki/IPTV) IPTV provider — no backend, no account
+with anyone but your provider.**
 
-The app talks **directly to a provider you configure at runtime** — there is no backend
-service to deploy or point at. You sign in with your provider's server URL, username, and
-password; the app syncs the catalog into a local SQLite database, and browsing, searching,
-filtering, and sorting all run against that local cache, so the app stays usable offline
-and does not re-hit the provider for every screen.
+You sign in with your provider's server URL, username, and password. The app pulls the
+whole catalog into a local SQLite database, and from then on browsing, searching,
+filtering, and sorting all run against that cache — so the UI stays instant and usable
+offline instead of round-tripping to the provider for every screen. A background refresh
+keeps the cache current once it passes 12 hours old.
 
-Downloads run through a background download manager: they survive the app being
-backgrounded, post progress notifications, support pause/resume via HTTP range requests,
-and land in the device's public Downloads folder.
+Downloads run through a real background download manager: they survive the app being
+backgrounded, post progress notifications, support pause and resume via HTTP range
+requests, and land in the device's shared Downloads folder where any other app can see
+them. Because Xtream providers commonly cap an account at one simultaneous connection,
+downloads are deliberately serialised — one at a time, the rest queued.
 
-**Package:** `com.rmaynar.voddownloader` · **Version:** 0.1.0+1
+**Package:** `com.rmaynar.voddownloader` · **Version:** 0.1.0+1 ·
+**Platforms:** Android, macOS
 
-The version is deliberately pre-1.0: the app is feature-complete and usable, but a
-few behaviours have not been verified on real hardware yet (see *Known gaps* below).
+The version is deliberately pre-1.0: the app is feature-complete and in daily use, but a
+few behaviours have not been verified on real hardware yet (see *⚠️ Known gaps* below).
 1.0.0 is reserved for when that list is clear.
 
-## Features
+## ✨ Features
 
-- Multiple saved provider accounts, switchable in-app
-- Movie and series catalogs with categories, search, sort, and infinite scroll
-- Series detail view with per-season episode lists and per-episode download
-- Download queue with pause / resume / cancel / retry, persisted across restarts
-- Scales to real catalog sizes (~40k movies / ~11k series tested)
-- Dark theme, phone and tablet layouts (bottom nav below 800dp, navigation rail above)
+### 📺 Catalog
+- **Direct-to-provider** — configure any Xtream Codes provider at runtime; nothing to
+  deploy or self-host
+- **Offline-first browsing** — the full catalog lives in local SQLite; screens never wait
+  on the network
+- **Non-blocking sync** — a cached catalog renders immediately while the refresh runs in
+  the background; only the very first sync shows a progress screen
+- **Built for real catalogs** — tested at ~40k movies and ~11k series, with sorting and
+  filtering pushed down into indexed SQL rather than done in Dart
+- **Movies and series** — categories, full-text search, sort by name/rating/year, and
+  infinite scroll
+- **Series detail view** — per-season episode lists with per-episode download
 
-## Requirements
+### ⬇️ Downloads
+- **Background download manager** — transfers continue when the app is backgrounded, with
+  progress notifications on Android
+- **Pause, resume, cancel, retry** — resume uses HTTP range requests, so an interrupted
+  download picks up where it stopped
+- **Persistent queue** — the queue and its progress survive app restarts
+- **One connection at a time** — downloads are serialised to respect the single-connection
+  limit Xtream providers typically enforce
+- **Lands in shared storage** — finished files are moved to `/storage/emulated/0/Download`
+  (Android) or `~/Downloads` (macOS), visible to every other app
+- **Configurable destination** — pick the download location from Settings
+
+### 👥 Accounts
+- **Multiple saved providers** — store several accounts and switch between them from the
+  top bar
+- **Per-account catalogs** — every cached row is scoped to a source id derived from the
+  provider URL and username, so accounts never see each other's data
+- **Credentials never leak** — the Xtream protocol embeds your username and password in
+  download URLs; the app redacts them out of every log line, error message, and persisted
+  record
+
+### 🎨 Interface
+- **Responsive** — bottom navigation on phones, a navigation rail from 800dp, desktop nav
+  links from 900dp
+- **Dark theme** throughout
+- **Branded** — a real app icon across the launcher, the Dock, and the in-app top bar
+
+## 🧰 Requirements
 
 | Tool | Version |
 | --- | --- |
@@ -42,7 +79,7 @@ few behaviours have not been verified on real hardware yet (see *Known gaps* bel
 The JDK, Android SDK, and Gradle rows apply to Android builds only — a macOS build needs
 just Flutter and Xcode. Check your setup with `flutter doctor`.
 
-## Quick start
+## 🚀 Quick start
 
 ```bash
 git clone <repo-url>
@@ -58,7 +95,7 @@ sync runs in the background and can take a while on large catalogs; subsequent l
 load instantly from cache and re-sync in the background once the cache is over 12 hours
 old.
 
-## Platform support
+## 💻 Platform support
 
 Android and macOS are both supported and tested. What gates the remaining platforms is
 `sqflite`, the catalog database the app opens at startup: it ships implementations for
@@ -78,7 +115,7 @@ rather than through a platform plugin — so it is absent from the plugin regist
 while still being fully functional. If you want Linux or Windows, `sqflite` is the only
 thing to solve.
 
-## Building
+## 🔨 Building
 
 ### Android
 
@@ -89,8 +126,11 @@ flutter build apk --release --split-per-abi # smaller per-architecture APKs
 flutter build appbundle --release          # AAB for Play Store upload
 ```
 
-Output lands in `build/app/outputs/flutter-apk/` (APK) or
-`build/app/outputs/bundle/release/` (AAB).
+Output lands in `build/app/outputs/bundle/release/` (AAB) or, for APKs, in two places:
+Gradle writes `build/app/outputs/apk/release/vod-downloader-<version>[-<abi>].apk` — named
+so the file is self-describing once it leaves the build directory — and the Flutter tool
+additionally copies it to `build/app/outputs/flutter-apk/app-release.apk` under its own
+fixed name. Either file is the same APK; prefer the named one when distributing.
 
 Install a built APK on a connected device:
 
@@ -151,11 +191,33 @@ The sandbox entitlements in `macos/Runner/*.entitlements` grant outgoing network
 and read/write to the user's Downloads folder — both are required, since the app
 downloads from an arbitrary user-entered host and moves finished files into `~/Downloads`.
 
-## Testing
+The bundle is **ad-hoc signed** (`CODE_SIGN_IDENTITY = "-"`, no team, not notarized). That
+is fine locally, but Gatekeeper refuses to open a copy that arrived over the internet
+until its quarantine attribute is cleared:
+
+```bash
+xattr -cr "/Applications/VOD Downloader.app"
+```
+
+### App icon
+
+Every platform's icon set is generated from the single source image
+`assets/vod-download-icon.jpeg`. After replacing that file, regenerate them:
+
+```bash
+dart run flutter_launcher_icons
+```
+
+`flutter_launcher_icons` is a dev dependency — it runs at generation time only and ships
+in no build. Its configuration lives in the `flutter_launcher_icons:` block in
+`pubspec.yaml`. The same image is also declared as a Flutter asset, because the in-app top
+bar renders it directly and cannot reach the generated platform icons.
+
+## 🧪 Testing
 
 ```bash
 flutter analyze                                       # expected: no issues
-flutter test                                          # expected: all tests pass (114)
+flutter test                                          # expected: all tests pass (123)
 flutter test test/features/download_queue_test.dart   # a single file
 flutter test test/features/download_queue_test.dart -n "pattern"   # a single test
 ```
@@ -189,7 +251,7 @@ Credentials are passed via `--dart-define-from-file` rather than read at runtime
 integration tests execute on the device and cannot read files from the host machine.
 Never commit real credentials into a test file.
 
-## Where downloads go
+## 📂 Where downloads go
 
 Completed downloads are moved out of app-private storage into the platform's shared
 Downloads folder, so other apps and a file browser can see them:
@@ -206,7 +268,7 @@ Downloads are deliberately **serialised, one at a time**. Xtream providers commo
 account at a single simultaneous connection, and a second concurrent transfer is simply
 refused by the server, so extra downloads queue and wait their turn.
 
-## Known gaps
+## ⚠️ Known gaps
 
 The app is feature-complete and in daily-usable shape, but these have not been confirmed
 on real hardware and are the reason the version is still pre-1.0:
@@ -228,7 +290,7 @@ Verified working: catalog sync and browsing at ~40k movies / ~11k series, and do
 running to completion with files landing in the shared Downloads folder on both Android
 and macOS.
 
-## Security notes
+## 🔐 Security notes
 
 - **Cleartext HTTP is permitted to any host.** Most Xtream providers serve plain HTTP and
   their hostnames are entered by the user at runtime, so a build-time domain allowlist
@@ -239,7 +301,7 @@ and macOS.
   app redacts them from every error message, log line, and persisted record — if you add
   a new error path, route it through the existing redaction helpers.
 
-## Project layout
+## 🗂️ Project layout
 
 ```
 lib/
