@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -48,6 +49,13 @@ class CatalogState {
 
   /// Check if an active source account is currently authenticated.
   bool get isAuthenticated => currentSourceId != null && currentSourceId!.isNotEmpty;
+
+  /// True while the very first sync for a source is running, i.e. there is
+  /// nothing cached to show yet. Screens use this to render a full-screen
+  /// loading state; a *refresh* of an already-populated catalog is deliberately
+  /// not included here, so it can happen quietly in the background while the
+  /// user browses.
+  bool get isInitialSync => isSyncing && movies.isEmpty && series.isEmpty;
 
   /// Total count of movies in memory.
   int get moviesCount => movies.length;
@@ -117,6 +125,22 @@ class CatalogState {
 
 /// Global StateNotifier managing the catalog state, SQLite caching, and sync operations.
 class CatalogNotifier extends StateNotifier<CatalogState> {
+  /// How long a cached catalog stays usable before it is refreshed.
+  ///
+  /// Catalogs are tens of thousands of items and a full sync is slow, so it is
+  /// not re-fetched on every launch. Past this age the refresh happens in the
+  /// background while the cached copy stays on screen — only a completely
+  /// empty cache blocks the UI.
+  static const Duration catalogStaleAfter = Duration(hours: 12);
+
+  /// Whether a catalog last synced at [lastSync] should be refreshed.
+  /// A null [lastSync] (never synced, or an unparseable timestamp) counts as
+  /// stale.
+  static bool isCatalogStale(DateTime? lastSync) {
+    if (lastSync == null) return true;
+    return DateTime.now().difference(lastSync) >= catalogStaleAfter;
+  }
+
   final Ref ref;
   final DatabaseService _db = DatabaseService.instance;
 
@@ -229,12 +253,14 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
         syncProgress: '',
       );
 
-      // 4. Trigger auto-sync if cache is empty
-      if (activeId != null &&
-          activeId.isNotEmpty &&
-          cachedMovies.isEmpty &&
-          cachedSeries.isEmpty) {
-        await syncCatalog(sourceId: activeId, forceSync: false);
+      // 4. Sync if there is nothing cached, or refresh quietly if what is
+      //    cached has gone stale.
+      if (activeId != null && activeId.isNotEmpty) {
+        await _syncIfNeeded(
+          sourceId: activeId,
+          hasCache: cachedMovies.isNotEmpty || cachedSeries.isNotEmpty,
+          lastSync: lastSync,
+        );
       }
     } catch (e) {
       state = state.copyWith(
@@ -293,9 +319,11 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
         syncProgress: '',
       );
 
-      if (cachedMovies.isEmpty && cachedSeries.isEmpty) {
-        await syncCatalog(sourceId: sourceId, forceSync: false);
-      }
+      await _syncIfNeeded(
+        sourceId: sourceId,
+        hasCache: cachedMovies.isNotEmpty || cachedSeries.isNotEmpty,
+        lastSync: lastSync,
+      );
     } catch (e) {
       state = state.copyWith(
         isLoading: false,
@@ -329,6 +357,29 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
   String _describeSyncError(Object error) {
     if (error is XtreamException) return error.message;
     return error.toString();
+  }
+
+  /// Decides whether a newly-active source needs syncing, and whether the
+  /// caller should wait for it.
+  ///
+  /// - No cache at all: awaited, because there is nothing to show until it
+  ///   lands. Screens render a loading state off [CatalogState.isInitialSync].
+  /// - Cache present but older than [catalogStaleAfter]: started but NOT
+  ///   awaited, so the cached catalog stays browsable while it refreshes in
+  ///   the background. The app shell's existing sync indicator covers it.
+  /// - Cache present and fresh: nothing happens.
+  Future<void> _syncIfNeeded({
+    required String sourceId,
+    required bool hasCache,
+    required DateTime? lastSync,
+  }) async {
+    if (!hasCache) {
+      await syncCatalog(sourceId: sourceId, forceSync: false);
+      return;
+    }
+    if (isCatalogStale(lastSync)) {
+      unawaited(syncCatalog(sourceId: sourceId, forceSync: false));
+    }
   }
 
   /// Downloads categories, movies, series directly from the Xtream provider
@@ -556,8 +607,13 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
         isLoading: false,
       );
 
+      // Deliberately NOT awaited. Credentials are verified and the account is
+      // saved by this point, so login has succeeded and the UI can move on
+      // immediately; the catalog screen renders its own loading state from
+      // `isInitialSync` while this runs. Awaiting here is what used to pin the
+      // user to the login form for the whole multi-minute first sync.
       state = state.copyWith(syncProgress: 'Fetching and saving catalog...');
-      await syncCatalog(sourceId: sourceId, forceSync: true);
+      unawaited(syncCatalog(sourceId: sourceId, forceSync: true));
     } on XtreamException catch (e) {
       state = state.copyWith(
         isLoading: false,

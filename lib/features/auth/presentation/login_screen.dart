@@ -89,14 +89,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             name: label.isNotEmpty ? label : null,
           );
 
+      // loginWithXtream returns as soon as the credentials are verified and
+      // the account is saved; the catalog sync continues in the background and
+      // the Movies screen shows its own loading state for it. No artificial
+      // delay here — the user has already waited for the network round trip.
       if (mounted) {
-        setState(() {
-          _currentStep = 'Saved to SQLite cache. Redirecting...';
-        });
-        await Future.delayed(const Duration(milliseconds: 350));
-        if (mounted) {
-          context.go('/movies');
-        }
+        context.go('/movies');
       }
     } catch (err) {
       if (mounted) {

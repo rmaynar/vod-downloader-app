@@ -7,6 +7,7 @@ import '../../../core/models/media_item.dart';
 import '../../../core/theme/app_theme.dart';
 import '../providers/catalog_provider.dart';
 import 'widgets/catalog_grid.dart';
+import 'widgets/catalog_loading_view.dart';
 import 'widgets/media_card.dart';
 import 'widgets/media_details_modal.dart';
 
@@ -197,6 +198,21 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
       (c) => c.categoryId == _selectedCategoryId,
       orElse: () => const CategoryItem(categoryId: 'all', categoryName: 'All Categories'),
     );
+
+    // First sync for this source: nothing cached to show yet, so the filter
+    // bar and an empty grid would just look broken. A stale-cache refresh
+    // does NOT land here — that stays browsable in the background.
+    if (catalog.isInitialSync) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        body: SafeArea(
+          child: CatalogLoadingView(
+            progress: catalog.syncProgress,
+            label: 'Movies',
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       backgroundColor: AppColors.background,
