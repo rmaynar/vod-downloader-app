@@ -459,9 +459,16 @@ class DownloadQueueNotifier extends StateNotifier<List<DownloadTask>> {
 
   void _onEngineProgress(EngineProgressUpdate update) {
     final current = _byId(update.taskId);
-    // Ignore stray/late progress ticks once a task has left the running
-    // state (e.g. arriving just after a cancel/pause/complete).
-    if (current == null || current.status != DownloadStatus.running) return;
+    if (current == null) return;
+    // Ignore stray/late progress ticks once a task has reached a state where
+    // progress is meaningless (cancelled, failed, complete) or deliberately
+    // frozen (paused). `queued` must NOT be ignored: the engine can deliver
+    // progress before, or instead of, the running status update, and
+    // discarding those left the UI pinned at 0% for the whole download.
+    if (current.status != DownloadStatus.running &&
+        current.status != DownloadStatus.queued) {
+      return;
+    }
 
     final updated = current.copyWith(
       progress: update.progress,

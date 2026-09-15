@@ -421,6 +421,51 @@ void main() {
     });
   });
 
+  group('progress while still queued', () {
+    // Regression: the engine can deliver progress before — or instead of —
+    // the running status update. Progress used to be dropped unless the task
+    // was already `running`, which pinned the UI at 0% for an entire
+    // multi-GB download that was in fact transferring fine.
+    test('progress arriving before the running status is not discarded',
+        () async {
+      final engine = FakeDownloadEngine();
+      final notifier = makeNotifier(engine: engine);
+
+      await notifier.enqueueMovie(item: _movie);
+      await settle();
+      expect(taskById(notifier, 'm1').status, DownloadStatus.queued);
+
+      // No pushStatus(running) at all — only progress.
+      engine.pushProgress('m1', 0.25, expectedFileSize: 6956258737);
+      await settle();
+
+      expect(taskById(notifier, 'm1').progress, 0.25,
+          reason: 'progress delivered while queued must still be applied');
+      expect(taskById(notifier, 'm1').bytesTotal, 6956258737);
+    });
+
+    test('progress is still ignored once a task is no longer active',
+        () async {
+      final engine = FakeDownloadEngine();
+      final notifier = makeNotifier(engine: engine);
+
+      await notifier.enqueueMovie(item: _movie);
+      await settle();
+      engine.pushStatus('m1', EngineStatus.running);
+      await settle();
+      engine.pushProgress('m1', 0.4);
+      await settle();
+
+      engine.pushStatus('m1', EngineStatus.canceled);
+      await settle();
+
+      // A late tick arriving after cancellation must not resurrect progress.
+      engine.pushProgress('m1', 0.9);
+      await settle();
+      expect(taskById(notifier, 'm1').progress, isNot(0.9));
+    });
+  });
+
   group('pause / resume / cancel', () {
     test('pause -> resume transitions', () async {
       final engine = FakeDownloadEngine();

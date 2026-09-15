@@ -141,22 +141,19 @@ class BackgroundDownloaderEngine implements DownloadEngine {
   final Map<String, bg.DownloadTask> _tasks = {};
 
   bool _initialized = false;
-  StreamSubscription<bg.TaskUpdate>? _updatesSubscription;
 
-  /// `FileDownloader().updates` is a **single-subscription** stream hanging
-  /// off a process-wide singleton, so it can be listened to once per
-  /// *process* — not once per engine instance. A per-instance guard is not
-  /// enough: a new engine is built whenever the `ProviderScope` is rebuilt
-  /// (logout/login, hot reload, or each test case constructing its own
-  /// scope), and the second one would throw
-  /// `Bad state: Stream has already been listened to`.
-  ///
-  /// Wrapping it once in a broadcast stream lets every instance attach
-  /// safely.
-  static Stream<bg.TaskUpdate>? _sharedUpdates;
+  /// Serialises downloads. Xtream providers commonly cap an account at a
+  /// small number of simultaneous connections — 1 is typical — and a second
+  /// concurrent transfer is simply refused by the server. Queueing here means
+  /// extra downloads wait their turn instead of failing.
+  final _taskQueue = bg.MemoryTaskQueue()
+    ..maxConcurrent = maxConcurrentDownloads;
 
-  static Stream<bg.TaskUpdate> get _updates =>
-      _sharedUpdates ??= bg.FileDownloader().updates.asBroadcastStream();
+  /// Simultaneous downloads allowed. Kept at 1 because that is the common
+  /// Xtream `max_connections` value; raising it risks the provider refusing
+  /// transfers, and the account's own limit is the real ceiling.
+  static const int maxConcurrentDownloads = 1;
+
 
   @override
   Stream<EngineStatusUpdate> get statusUpdates => _statusController.stream;
@@ -188,10 +185,22 @@ class BackgroundDownloaderEngine implements DownloadEngine {
       progressBar: true,
     );
 
-    // Listens to the process-wide broadcast wrapper (see [_updates]), never
-    // to FileDownloader().updates directly. Consumers of this engine fan out
-    // from the broadcast controllers above rather than touching either.
-    _updatesSubscription = _updates.listen(_handleUpdate);
+    // Deliberately NOT FileDownloader().updates. That stream is
+    // single-subscription and hangs off a *mutable* StreamController field
+    // inside the plugin (`base_downloader.dart`'s `var updates`), which
+    // `resetUpdatesStreamController()` closes and replaces. Anything holding
+    // the old stream silently stops receiving events, and the plugin then
+    // drops updates entirely because it checks `updates.hasListener` on the
+    // *current* controller before emitting. Observed in practice as exactly
+    // one event arriving per app run while the download ran to completion.
+    //
+    // registerCallbacks is the plugin's documented mechanism for exactly
+    // this reason, and it is immune to the controller being swapped.
+    bg.FileDownloader().addTaskQueue(_taskQueue);
+    bg.FileDownloader().registerCallbacks(
+      taskStatusCallback: _handleUpdate,
+      taskProgressCallback: _handleUpdate,
+    );
 
     await bg.FileDownloader().start();
 
@@ -213,8 +222,6 @@ class BackgroundDownloaderEngine implements DownloadEngine {
 
   @override
   void dispose() {
-    _updatesSubscription?.cancel();
-    _updatesSubscription = null;
     _initialized = false;
     _statusController.close();
     _progressController.close();
@@ -307,7 +314,12 @@ class BackgroundDownloaderEngine implements DownloadEngine {
       displayName: fileName,
     );
     _tasks[taskId] = task;
-    return bg.FileDownloader().enqueue(task);
+    // Via the queue, not FileDownloader().enqueue, so maxConcurrent is
+    // honoured. add() is fire-and-forget: the task is queued now and
+    // enqueued with the plugin when a slot frees up, so the status stream
+    // is what reports it actually starting.
+    _taskQueue.add(task);
+    return true;
   }
 
   @override
