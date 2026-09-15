@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
-import 'package:nodecast_catalog_flutter/core/models/source_account.dart';
-import 'package:nodecast_catalog_flutter/features/catalog/presentation/home_screen.dart';
-import 'package:nodecast_catalog_flutter/features/catalog/providers/catalog_provider.dart';
-import 'package:nodecast_catalog_flutter/features/navigation/app_shell.dart';
+import 'package:vod_downloader/core/models/source_account.dart';
+import 'package:vod_downloader/features/catalog/presentation/home_screen.dart';
+import 'package:vod_downloader/features/catalog/providers/catalog_provider.dart';
+import 'package:vod_downloader/features/navigation/app_shell.dart';
 
 /// A CatalogNotifier stand-in that skips real network/DB init and records
 /// calls made to [syncCatalog], so tests can drive an "authenticated" UI

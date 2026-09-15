@@ -4,8 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/models/media_item.dart';
 import '../../../../core/models/series_details.dart';
+import '../../../../core/network/xtream_client.dart';
+import '../../../../core/providers/xtream_provider.dart';
 import '../../../../core/theme/app_theme.dart';
-import '../../providers/catalog_provider.dart';
+import '../../../downloads/download_queue_provider.dart';
+import '../../../downloads/download_task.dart';
 import 'fallback_poster.dart';
 
 class MediaDetailsModal extends ConsumerStatefulWidget {
@@ -57,8 +60,6 @@ class _MediaDetailsModalState extends ConsumerState<MediaDetailsModal> {
   bool _isLoadingEpisodes = false;
   String? _episodesError;
   String? _activeSeason;
-  final Set<String> _downloadedEpisodeIds = {};
-  bool _isMovieDownloaded = false;
 
   @override
   void initState() {
@@ -71,9 +72,13 @@ class _MediaDetailsModalState extends ConsumerState<MediaDetailsModal> {
   Future<void> _fetchSeriesInfoIfNeeded() async {
     if (_resolvedType != MediaType.series) return;
 
-    final catalogState = ref.read(catalogProvider);
-    final sourceId = catalogState.currentSourceId;
-    if (sourceId == null || sourceId.isEmpty) return;
+    final xtreamClient = ref.read(xtreamClientProvider);
+    if (xtreamClient == null) {
+      setState(() {
+        _episodesError = 'No active account. Sign in to load episodes.';
+      });
+      return;
+    }
 
     setState(() {
       _isLoadingEpisodes = true;
@@ -81,9 +86,8 @@ class _MediaDetailsModalState extends ConsumerState<MediaDetailsModal> {
     });
 
     try {
-      final apiClient = ref.read(apiClientProvider);
       final seriesId = widget.item.id;
-      final details = await apiClient.getSeriesInfo(sourceId, seriesId);
+      final details = await xtreamClient.getSeriesInfo(seriesId);
 
       if (mounted) {
         setState(() {
@@ -98,65 +102,151 @@ class _MediaDetailsModalState extends ConsumerState<MediaDetailsModal> {
       if (mounted) {
         setState(() {
           _isLoadingEpisodes = false;
-          _episodesError = 'Failed to load episode details: $e';
+          _episodesError = e is XtreamException
+              ? e.message
+              : 'Failed to load episode details. Please try again.';
         });
       }
     }
   }
 
-  void _handleDownloadMovie() {
-    final catalogState = ref.read(catalogProvider);
-    final sourceId = catalogState.currentSourceId;
-    if (sourceId == null || sourceId.isEmpty) return;
+  void _handleDownloadMovie(DownloadTask? task) {
+    if (task != null && task.status == DownloadStatus.failed) {
+      ref.read(downloadQueueProvider.notifier).retry(task.id);
+      return;
+    }
+    if (task != null) return; // Already queued/running/complete.
 
-    ref.read(downloadServiceProvider).triggerDownload(
-          sourceId: sourceId,
-          type: MediaType.movie,
-          itemId: widget.item.id,
-          container: widget.item.containerExtension ?? 'mp4',
-          title: widget.item.name,
-        );
-
-    setState(() {
-      _isMovieDownloaded = true;
-    });
-
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted) {
-        setState(() {
-          _isMovieDownloaded = false;
-        });
-      }
-    });
+    ref.read(downloadQueueProvider.notifier).enqueueMovie(item: widget.item);
   }
 
-  void _handleDownloadEpisode(EpisodeItem episode) {
-    final catalogState = ref.read(catalogProvider);
-    final sourceId = catalogState.currentSourceId;
-    if (sourceId == null || sourceId.isEmpty) return;
+  void _handleDownloadEpisode(EpisodeItem episode, DownloadTask? task) {
+    if (task != null && task.status == DownloadStatus.failed) {
+      ref.read(downloadQueueProvider.notifier).retry(task.id);
+      return;
+    }
+    if (task != null) return; // Already queued/running/complete.
 
-    final epTitle =
-        '${widget.item.name} S${_activeSeason ?? "1"}E${episode.episodeNum} - ${episode.title}';
-
-    ref.read(downloadServiceProvider).triggerDownload(
-          sourceId: sourceId,
-          type: MediaType.series,
-          itemId: episode.id,
-          container: episode.containerExtension ?? 'mp4',
-          title: epTitle,
+    ref.read(downloadQueueProvider.notifier).enqueueEpisode(
+          episode: episode,
+          seriesName: widget.item.name,
+          seasonNum: _activeSeason,
         );
+  }
 
-    setState(() {
-      _downloadedEpisodeIds.add(episode.id);
-    });
+  // --- Shared download-status styling for the movie button and per-episode
+  // chips below. Renders real queue state — queued/running (determinate,
+  // driven by task.progress — never a spinner)/complete/failed — instead of
+  // the old fixed-timer fake-success state.
 
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted) {
-        setState(() {
-          _downloadedEpisodeIds.remove(episode.id);
-        });
-      }
-    });
+  Color _downloadButtonColor(DownloadStatus? status) {
+    switch (status) {
+      case DownloadStatus.complete:
+        return AppColors.emerald;
+      case DownloadStatus.failed:
+        return AppColors.red.withValues(alpha: 0.15);
+      case DownloadStatus.running:
+      case DownloadStatus.queued:
+      case DownloadStatus.paused:
+        return AppColors.primary;
+      case DownloadStatus.canceled:
+      case null:
+        return AppColors.surfaceElevated;
+    }
+  }
+
+  Color _downloadButtonBorderColor(DownloadStatus? status) {
+    switch (status) {
+      case DownloadStatus.complete:
+        return AppColors.emerald;
+      case DownloadStatus.failed:
+        return AppColors.red;
+      case DownloadStatus.running:
+      case DownloadStatus.queued:
+      case DownloadStatus.paused:
+        return AppColors.primary;
+      case DownloadStatus.canceled:
+      case null:
+        return AppColors.borderLight;
+    }
+  }
+
+  Color _downloadButtonTextColor(DownloadStatus? status) {
+    switch (status) {
+      case DownloadStatus.failed:
+        return AppColors.red;
+      case DownloadStatus.canceled:
+      case null:
+        return AppColors.textLight;
+      case DownloadStatus.complete:
+      case DownloadStatus.running:
+      case DownloadStatus.queued:
+      case DownloadStatus.paused:
+        return Colors.white;
+    }
+  }
+
+  Widget _downloadButtonIcon(DownloadTask? task, {required double size}) {
+    switch (task?.status) {
+      case DownloadStatus.queued:
+        return Icon(Icons.schedule_rounded, size: size, color: Colors.white);
+      case DownloadStatus.running:
+        return SizedBox(
+          width: size,
+          height: size,
+          child: CircularProgressIndicator(
+            value: task!.progress.clamp(0.0, 1.0),
+            strokeWidth: 2,
+            color: Colors.white,
+            backgroundColor: Colors.white.withValues(alpha: 0.25),
+          ),
+        );
+      case DownloadStatus.paused:
+        return Icon(Icons.pause_rounded, size: size, color: Colors.white);
+      case DownloadStatus.complete:
+        return Icon(Icons.check_rounded, size: size, color: Colors.white);
+      case DownloadStatus.failed:
+        return Icon(Icons.refresh_rounded, size: size, color: AppColors.red);
+      case DownloadStatus.canceled:
+      case null:
+        return Icon(Icons.download_rounded, size: size, color: AppColors.textLight);
+    }
+  }
+
+  String _downloadButtonLabel(DownloadTask? task) {
+    switch (task?.status) {
+      case DownloadStatus.queued:
+        return 'Queued';
+      case DownloadStatus.running:
+        return '${(task!.progress.clamp(0.0, 1.0) * 100).round()}%';
+      case DownloadStatus.paused:
+        return 'Paused';
+      case DownloadStatus.complete:
+        return 'Downloaded';
+      case DownloadStatus.failed:
+        return 'Retry';
+      case DownloadStatus.canceled:
+      case null:
+        return 'Download';
+    }
+  }
+
+  String _movieButtonLabel(DownloadTask? task) {
+    switch (task?.status) {
+      case DownloadStatus.queued:
+        return 'Queued...';
+      case DownloadStatus.running:
+        return 'Downloading ${(task!.progress.clamp(0.0, 1.0) * 100).round()}%';
+      case DownloadStatus.paused:
+        return 'Paused';
+      case DownloadStatus.complete:
+        return 'Downloaded';
+      case DownloadStatus.failed:
+        return 'Retry Download';
+      case DownloadStatus.canceled:
+      case null:
+        return 'Download Movie';
+    }
   }
 
   @override
@@ -795,7 +885,7 @@ class _MediaDetailsModalState extends ConsumerState<MediaDetailsModal> {
                   separatorBuilder: (context, index) => const SizedBox(height: 6),
                   itemBuilder: (context, index) {
                     final ep = activeEpisodes[index];
-                    final isEpDownloaded = _downloadedEpisodeIds.contains(ep.id);
+                    final epTask = ref.watch(downloadTaskProvider(ep.id));
 
                     return Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -840,43 +930,46 @@ class _MediaDetailsModalState extends ConsumerState<MediaDetailsModal> {
                             ),
                           ],
                           const SizedBox(width: 10),
-                          InkWell(
-                            onTap: () => _handleDownloadEpisode(ep),
-                            borderRadius: BorderRadius.circular(6),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 200),
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: isEpDownloaded
-                                    ? AppColors.emerald
-                                    : AppColors.surfaceElevated,
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 108),
+                            child: Tooltip(
+                              message: epTask?.status == DownloadStatus.failed
+                                  ? (epTask?.error ?? 'Download failed — tap to retry')
+                                  : '',
+                              child: InkWell(
+                                onTap: () => _handleDownloadEpisode(ep, epTask),
                                 borderRadius: BorderRadius.circular(6),
-                                border: Border.all(
-                                  color: isEpDownloaded
-                                      ? AppColors.emerald
-                                      : AppColors.borderLight,
-                                ),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    isEpDownloaded
-                                        ? Icons.check_rounded
-                                        : Icons.download_rounded,
-                                    size: 13,
-                                    color: isEpDownloaded ? Colors.white : AppColors.textLight,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    isEpDownloaded ? 'Downloading' : 'Download',
-                                    style: TextStyle(
-                                      color: isEpDownloaded ? Colors.white : AppColors.textLight,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
+                                  padding:
+                                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: _downloadButtonColor(epTask?.status),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: _downloadButtonBorderColor(epTask?.status),
                                     ),
                                   ),
-                                ],
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      _downloadButtonIcon(epTask, size: 13),
+                                      const SizedBox(width: 4),
+                                      Flexible(
+                                        child: Text(
+                                          _downloadButtonLabel(epTask),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: _downloadButtonTextColor(epTask?.status),
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ),
                             ),
                           ),
@@ -914,22 +1007,39 @@ class _MediaDetailsModalState extends ConsumerState<MediaDetailsModal> {
         // Download Movie Button (for movies)
         if (_resolvedType == MediaType.movie) ...[
           const SizedBox(width: 10),
-          ElevatedButton.icon(
-            onPressed: _handleDownloadMovie,
-            icon: Icon(
-              _isMovieDownloaded ? Icons.check_rounded : Icons.download_rounded,
-              size: 16,
-              color: Colors.white,
-            ),
-            label: Text(
-              _isMovieDownloaded ? 'Downloading...' : 'Download Movie',
-              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _isMovieDownloaded ? AppColors.emerald : AppColors.primary,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            ),
+          Builder(
+            builder: (context) {
+              final movieTask = ref.watch(downloadTaskProvider(widget.item.id));
+              return Tooltip(
+                message: movieTask?.status == DownloadStatus.failed
+                    ? (movieTask?.error ?? 'Download failed — tap to retry')
+                    : '',
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 220),
+                  child: ElevatedButton.icon(
+                    onPressed: () => _handleDownloadMovie(movieTask),
+                    icon: _downloadButtonIcon(movieTask, size: 16),
+                    label: Text(
+                      _movieButtonLabel(movieTask),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: movieTask?.status == DownloadStatus.failed
+                            ? AppColors.red
+                            : Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _downloadButtonColor(movieTask?.status),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    ),
+                  ),
+                ),
+              );
+            },
           ),
         ],
 

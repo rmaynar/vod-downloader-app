@@ -1,4 +1,4 @@
-package com.example.nodecast_catalog_flutter
+package com.rmaynar.voddownloader
 
 import io.flutter.embedding.android.FlutterActivity
 
