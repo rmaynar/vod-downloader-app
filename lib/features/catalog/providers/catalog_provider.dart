@@ -10,12 +10,9 @@ import '../../../core/models/catalog_stats.dart';
 import '../../../core/models/category_item.dart';
 import '../../../core/models/media_item.dart';
 import '../../../core/models/xtream_source.dart';
-import '../../../core/network/api_client.dart';
 import '../../../core/network/xtream_client.dart';
-import '../../../core/providers/backend_config_provider.dart';
 import '../../../core/providers/xtream_provider.dart';
 import '../../../core/services/download_service.dart';
-export '../../../core/providers/backend_config_provider.dart' show apiClientProvider;
 
 /// State representing the entire catalog and source accounts.
 class CatalogState {

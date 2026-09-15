@@ -48,11 +48,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   /// response). Matching on those known messages lets the UI tell the user
   /// "fix your username/password" apart from "check your network", which
   /// call for different next steps.
-  bool _isCredentialFailure(XtreamException error) {
-    final message = error.message.toLowerCase();
-    return message.contains('invalid xtream username or password') ||
-        message.contains('account is not active');
-  }
+  bool _isCredentialFailure(XtreamException error) => error.isAuthFailure;
 
   Future<void> _handleTestConnection() async {
     final client = ref.read(xtreamClientProvider);

@@ -220,6 +220,68 @@ void main() {
       );
     });
 
+    // The UI branches on `kind` to decide what to tell the user to do, so the
+    // classification is behaviour, not a detail. Matching on message text
+    // instead would break silently the moment any wording changed.
+    test('classifies rejected credentials as kind.credentials', () async {
+      mockAdapter.handler = (options) =>
+          _jsonBody('{"user_info": {"auth": 0}}', 200);
+
+      await expectLater(
+        client.authenticate(),
+        throwsA(
+          isA<XtreamException>()
+              .having((e) => e.kind, 'kind', XtreamErrorKind.credentials)
+              .having((e) => e.isAuthFailure, 'isAuthFailure', isTrue),
+        ),
+      );
+    });
+
+    test('classifies an expired account as kind.inactiveAccount', () async {
+      mockAdapter.handler = (options) => _jsonBody(
+            '{"user_info": {"auth": 1, "status": "Expired"}}',
+            200,
+          );
+
+      await expectLater(
+        client.authenticate(),
+        throwsA(
+          isA<XtreamException>()
+              .having((e) => e.kind, 'kind', XtreamErrorKind.inactiveAccount)
+              .having((e) => e.isAuthFailure, 'isAuthFailure', isTrue),
+        ),
+      );
+    });
+
+    test('classifies a malformed body as kind.protocol, not an auth failure',
+        () async {
+      mockAdapter.handler = (options) => _jsonBody('{"nonsense": true}', 200);
+
+      await expectLater(
+        client.authenticate(),
+        throwsA(
+          isA<XtreamException>()
+              .having((e) => e.kind, 'kind', XtreamErrorKind.protocol)
+              .having((e) => e.isAuthFailure, 'isAuthFailure', isFalse),
+        ),
+      );
+    });
+
+    // The message is shown verbatim in the UI, so it must never carry the
+    // credential values themselves (the word "password" is fine).
+    test('an exception message never contains the credential values', () async {
+      mockAdapter.handler = (options) =>
+          _jsonBody('{"user_info": {"auth": 0}}', 200);
+
+      try {
+        await client.authenticate();
+        fail('expected authenticate() to throw');
+      } on XtreamException catch (e) {
+        expect(e.message, isNot(contains('myp@ss')));
+        expect(e.message, isNot(contains('myuser')));
+      }
+    });
+
     test('authenticate parses valid response including exp_date', () async {
       mockAdapter.handler = (options) {
         return _jsonBody('''{

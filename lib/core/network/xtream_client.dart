@@ -12,14 +12,50 @@ import '../models/xtream_source.dart';
 /// Exception thrown when a direct-to-provider Xtream Codes API request fails,
 /// either at the network layer or because the provider reports invalid /
 /// inactive credentials.
+/// What kind of failure an [XtreamException] represents.
+///
+/// Callers need this to tell the user what to *do*: bad credentials mean
+/// "sign in again", an unreachable server means "check your connection".
+/// Classify on this enum rather than by matching on [XtreamException.message]
+/// — message wording is for humans and changes freely.
+enum XtreamErrorKind {
+  /// Username/password rejected by the provider (`user_info.auth == 0`).
+  credentials,
+
+  /// Credentials are valid but the account is expired, banned or disabled.
+  inactiveAccount,
+
+  /// The provider could not be reached: DNS, timeout, refused connection.
+  network,
+
+  /// Reached the provider, but the response was not what Xtream should send.
+  protocol,
+
+  /// Anything not otherwise classified.
+  unknown,
+}
+
 class XtreamException implements Exception {
+  /// Human-readable, safe to show in the UI. Never contains credentials.
   final String message;
   final int? statusCode;
+  final XtreamErrorKind kind;
 
-  XtreamException(this.message, {this.statusCode});
+  XtreamException(
+    this.message, {
+    this.statusCode,
+    this.kind = XtreamErrorKind.unknown,
+  });
 
+  /// Whether re-entering credentials is the user's likely remedy.
+  bool get isAuthFailure =>
+      kind == XtreamErrorKind.credentials ||
+      kind == XtreamErrorKind.inactiveAccount;
+
+  /// Returns [message] alone — UI surfaces must use this, never [toString],
+  /// which carries debugging noise that should not reach a user.
   @override
-  String toString() => 'XtreamException($statusCode): $message';
+  String toString() => 'XtreamException($kind, $statusCode): $message';
 }
 
 /// Parsed `user_info` block returned by the Xtream `player_api.php`
@@ -211,9 +247,13 @@ class XtreamClient {
         message = 'Could not connect to Xtream server at $_baseUrl';
       }
 
-      return XtreamException(message, statusCode: statusCode);
+      return XtreamException(
+        message,
+        statusCode: statusCode,
+        kind: XtreamErrorKind.network,
+      );
     }
-    return XtreamException(error.toString());
+    return XtreamException(error.toString(), kind: XtreamErrorKind.unknown);
   }
 
   /// Authenticates against the provider (the Xtream `player_api.php` request
@@ -235,6 +275,7 @@ class XtreamClient {
         throw XtreamException(
           'Invalid response from Xtream server',
           statusCode: response.statusCode,
+          kind: XtreamErrorKind.protocol,
         );
       }
 
@@ -243,11 +284,15 @@ class XtreamClient {
       );
 
       if (!userInfo.auth) {
-        throw XtreamException('Invalid Xtream username or password');
+        throw XtreamException(
+          'Invalid Xtream username or password',
+          kind: XtreamErrorKind.credentials,
+        );
       }
       if (userInfo.status != 'Active') {
         throw XtreamException(
           'Xtream account is not active (status: ${userInfo.status})',
+          kind: XtreamErrorKind.inactiveAccount,
         );
       }
 
@@ -360,6 +405,7 @@ class XtreamClient {
       throw XtreamException(
         'Invalid series info response format',
         statusCode: response.statusCode,
+        kind: XtreamErrorKind.protocol,
       );
     } on XtreamException {
       rethrow;

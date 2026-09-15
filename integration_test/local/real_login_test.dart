@@ -63,8 +63,10 @@ void main() {
       );
     }
 
-    // Start from a clean, logged-out state using the app's default backend
-    // proxy URL (http://10.0.2.2:3000), exactly matching the bug report.
+    // Start from a clean, logged-out state. Nothing is configured beyond the
+    // credentials below: the app now authenticates straight against the
+    // provider's player_api.php, so this passing is itself the proof that no
+    // backend proxy is involved. Run it with the Node server stopped.
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
 

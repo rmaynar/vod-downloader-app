@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/models/account.dart';
+import '../../../core/network/xtream_client.dart';
 import '../../catalog/providers/catalog_provider.dart';
 import '../../../core/theme/app_colors.dart';
 
@@ -100,7 +101,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     } catch (err) {
       if (mounted) {
         setState(() {
-          _localError = err.toString().replaceFirst('Exception: ', '');
+          // Use the exception's own message, never toString() - that would
+          // put "XtreamException(credentials, null): ..." on screen.
+          _localError = err is XtreamException
+              ? err.message
+              : err.toString().replaceFirst('Exception: ', '');
         });
       }
     } finally {
