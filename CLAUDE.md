@@ -1,4 +1,7 @@
 <!-- rtk-instructions v2 -->
+## Token Optimization (RTK)
+- Prefix heavy terminal commands with `rtk` when running arbitrary inspections (e.g., `rtk git log`, `rtk cargo test`).
+- Keep command outputs concise and favor quiet flags (`--quiet`, `-q`) alongside RTK filtering.
 # Command output
 
 Command output here is condensed to save tokens, keeping every signal and
