@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/models/media_item.dart';
 import '../../../../core/models/series_details.dart';
+import '../../../../core/network/xtream_client.dart';
+import '../../../../core/providers/xtream_provider.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../providers/catalog_provider.dart';
 import 'fallback_poster.dart';
@@ -71,9 +73,13 @@ class _MediaDetailsModalState extends ConsumerState<MediaDetailsModal> {
   Future<void> _fetchSeriesInfoIfNeeded() async {
     if (_resolvedType != MediaType.series) return;
 
-    final catalogState = ref.read(catalogProvider);
-    final sourceId = catalogState.currentSourceId;
-    if (sourceId == null || sourceId.isEmpty) return;
+    final xtreamClient = ref.read(xtreamClientProvider);
+    if (xtreamClient == null) {
+      setState(() {
+        _episodesError = 'No active account. Sign in to load episodes.';
+      });
+      return;
+    }
 
     setState(() {
       _isLoadingEpisodes = true;
@@ -81,9 +87,8 @@ class _MediaDetailsModalState extends ConsumerState<MediaDetailsModal> {
     });
 
     try {
-      final apiClient = ref.read(apiClientProvider);
       final seriesId = widget.item.id;
-      final details = await apiClient.getSeriesInfo(sourceId, seriesId);
+      final details = await xtreamClient.getSeriesInfo(seriesId);
 
       if (mounted) {
         setState(() {
@@ -98,7 +103,9 @@ class _MediaDetailsModalState extends ConsumerState<MediaDetailsModal> {
       if (mounted) {
         setState(() {
           _isLoadingEpisodes = false;
-          _episodesError = 'Failed to load episode details: $e';
+          _episodesError = e is XtreamException
+              ? e.message
+              : 'Failed to load episode details. Please try again.';
         });
       }
     }
